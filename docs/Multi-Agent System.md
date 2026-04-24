@@ -1,0 +1,262 @@
+---
+title: Multi-Agent System
+tags: [agents, multi-agent, architecture, design, planning]
+aliases: [Agent System, Agents, How Agents Work]
+---
+
+# Multi-Agent System
+
+## The core idea
+
+A single model trying to do everything — chat, plan, write code, read files, run commands — is going to be mediocre at all of it. The solution is the same one used in software engineering: **separation of concerns**.
+
+Each agent has one job. Each agent uses the model best suited for that job. A planner routes work between agents. The user only talks to one interface.
+
+---
+
+## Agent roster
+
+```mermaid
+flowchart TD
+    User([User]) <--> Conversation
+
+    subgraph Orchestrator["Orchestrator Layer"]
+        Conversation["Conversation Agent\nUnderstands user, asks questions"]
+        Planner["Planner Agent\nBuilds phased implementation plan"]
+    end
+
+    Planner --> Filesystem
+    Planner --> CodeWriter
+    Planner --> CodeReader
+    Planner --> Shell
+    Planner --> Reviewer
+
+    subgraph Execution["Execution Layer"]
+        Filesystem["Filesystem Agent\n✅ Built\nFolders, files, venv, packages"]
+        CodeWriter["Code Writer Agent\n🔨 Next\nWrites code files from spec"]
+        CodeReader["Code Reader Agent\n🔨 Next\nReads and understands codebase"]
+        Shell["Shell Agent\n🔨 Planned\nRuns commands, tests, builds"]
+        Reviewer["Reviewer Agent\n🔨 Planned\nReviews code quality"]
+    end
+```
+
+---
+
+## Each agent in detail
+
+### Conversation Agent
+**Status:** Partial (current main chat loop)
+**Model:** `qwen2.5-coder:7b`
+
+Responsibilities:
+- Maintains conversation with the user
+- Understands what the user wants to build
+- Detects when a task requires action and routes to the right agent
+- Asks clarifying questions when the request is ambiguous
+- Presents results back to the user in plain language
+
+This is the only agent the user ever directly interacts with. Everything else is invoked transparently.
+
+---
+
+### Planner Agent
+**Status:** ⬜ Planned (Phase 7)
+**Model:** `qwen3.5:latest`
+
+Responsibilities:
+- Takes a problem statement from the Conversation Agent
+- Identifies ambiguities and surfaces them as questions
+- Builds a phased, ordered implementation plan
+- Breaks the plan into tasks assigned to specific agents
+- Tracks progress and handles partial failures
+
+Example output:
+```
+Phase 1: Project setup
+  → Filesystem Agent: create project folder, venv, install deps
+
+Phase 2: Core models
+  → Code Writer: create User model, Post model
+
+Phase 3: API routes
+  → Code Writer: create /users, /posts endpoints
+  → Code Reader: verify route structure matches models
+
+Phase 4: Tests
+  → Shell Agent: run pytest, report failures
+  → Code Writer: fix failing tests
+```
+
+---
+
+### Filesystem Agent
+**Status:** ✅ Built (Phase 3)
+**Model:** `qwen3.5:latest`
+**Tools:** `create_folder`, `create_file`, `read_file`, `list_directory`, `delete_file`, `delete_folder`, `move_file`, `create_venv`, `install_packages`, `run_command`
+
+See [[agents/Filesystem Agent]] for full documentation.
+
+---
+
+### Code Writer Agent
+**Status:** 🔨 Next (Phase 5)
+**Model:** `qwen2.5-coder:7b` for generation + `qwen3.5:latest` for tool calling
+
+Responsibilities:
+- Receives a spec (what to write, where to write it)
+- Generates code using the code-specialist model
+- Uses filesystem tools to write the files
+- Can iterate based on feedback from the Reviewer Agent
+
+Tools needed:
+- `create_file` (reuse)
+- `read_file` (reuse — to check existing code before writing)
+- `write_code_block` (new — replaces a specific block in an existing file)
+- `insert_at_line` (new — inserts code at a specific line)
+
+---
+
+### Code Reader Agent
+**Status:** 🔨 Next (Phase 5)
+**Model:** `qwen2.5-coder:7b`
+
+Responsibilities:
+- Reads the codebase and builds an understanding of its structure
+- Answers questions: "what does X do?", "where is Y defined?"
+- Identifies patterns, dependencies, entry points
+- Feeds context to the Planner and Code Writer agents
+
+Tools needed:
+- `read_file` (reuse)
+- `list_directory` (reuse)
+- `get_file_tree` (new — full nested directory tree)
+- `search_in_files` (new — grep pattern across project)
+- `get_symbol_definition` (new — find where a function/class is defined)
+
+---
+
+### Shell Agent
+**Status:** 🔨 Planned (Phase 6)
+**Model:** `qwen3.5:latest`
+
+Responsibilities:
+- Runs shell commands and captures output
+- Runs test suites and parses results
+- Starts/stops servers
+- Feeds command output back to the Planner or Code Writer
+
+Tools needed:
+- `run_command` (reuse, extended)
+- `stream_output` (new — stream stdout in real time)
+- `check_process` (new — is a process running?)
+- `kill_process` (new — stop a running process)
+
+---
+
+### Reviewer Agent
+**Status:** 🔨 Planned (Phase 7)
+**Model:** `qwen2.5-coder:7b`
+
+Responsibilities:
+- Reads generated code files
+- Checks for correctness, style, security issues
+- Produces structured feedback (pass / warn / fail per file)
+- Requests changes from the Code Writer if issues are found
+
+---
+
+## The conversation and clarification flow
+
+When the user gives an ambiguous or incomplete request, the system should ask — not guess.
+
+```
+User: "build me a REST API"
+   ↓
+Conversation Agent detects: incomplete — missing stack, auth, models, endpoints
+   ↓
+Planner generates clarifying questions:
+  1. What framework? (FastAPI / Flask / Django)
+  2. What data models do you need?
+  3. Do you need authentication?
+  4. Database? (SQLite / PostgreSQL / MongoDB)
+  5. Should I include tests?
+   ↓
+User answers questions
+   ↓
+Planner builds implementation plan
+   ↓
+Execution begins, phase by phase
+   ↓
+Each phase is confirmed with the user before proceeding
+```
+
+This mirrors exactly how Claude Code works — it asks before acting on ambiguous requests.
+
+---
+
+## Project documentation as a first-class output
+
+Every project CodeMitra works on should have a `.codemitra/` folder created automatically:
+
+```
+your-project/
+├── .codemitra/
+│   ├── context.md        # What this project is, stack, entry points
+│   ├── plan.md           # The current implementation plan
+│   ├── session-log.jsonl # History of all agent actions
+│   └── decisions.md      # Why certain choices were made
+├── docs/                 # Obsidian vault (if enabled)
+│   ├── Home.md
+│   ├── Architecture.md
+│   └── ...
+└── <your project files>
+```
+
+When CodeMitra starts on a project:
+1. Checks for `.codemitra/context.md` — loads existing context
+2. If new project: runs Code Reader Agent to understand the codebase
+3. Writes a context file so the next session knows where things stand
+
+This is what gives CodeMitra memory across sessions.
+
+---
+
+## How agents are connected technically
+
+```python
+# Each agent is a function that takes an LLM and a request,
+# runs a tool-calling loop, and returns a structured response.
+
+def run(llm, user_request: str) -> AgentResponse:
+    active_tools = _guard.filter_tools(_ALL_TOOLS)
+    llm_with_tools = llm.bind_tools(active_tools)
+    messages = [SystemMessage(prompt), HumanMessage(user_request)]
+
+    while True:
+        response = llm_with_tools.invoke(messages)
+        messages.append(response)
+
+        if not response.tool_calls:
+            return AgentResponse(steps=steps, summary=response.content)
+
+        for tc in response.tool_calls:
+            result = tool_map[tc["name"]].invoke(tc["args"])
+            steps.append(ToolResult(tc["name"], tc["args"], result))
+            messages.append(ToolMessage(content=result, tool_call_id=tc["id"]))
+```
+
+The Planner Agent will extend this by calling other agents as tools:
+
+```python
+@tool
+def run_filesystem_agent(request: str) -> str:
+    "Set up files and directories for the project."
+    return filesystem.run(agent_llm, request).summary
+
+@tool
+def run_code_writer_agent(spec: str, file_path: str) -> str:
+    "Write a code file according to the given specification."
+    return code_writer.run(agent_llm, spec, file_path).summary
+```
+
+Agents calling agents. Each layer handles its own scope.

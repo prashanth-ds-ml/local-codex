@@ -17,7 +17,11 @@ aliases: [Home, Index]
 | [[Setup]] | Install, configure, and run |
 | [[Architecture]] | How the system is designed |
 | [[Roadmap]] | Phase-by-phase build plan |
+| [[Vision]] | Why CodeMitra exists — the Ollama capability gap |
+| [[Tech Stack]] | Every dependency, layer by layer |
+| [[Multi-Agent System]] | Full agent roster and how they connect |
 | [[agents/Filesystem Agent]] | The first agent — files, venvs, packages |
+| [[reference/Ollama Models]] | Which models support tool calling and which don't |
 | [[reference/Tools]] | All 10 tools reference |
 | [[reference/Models]] | Model selection and why two models |
 | [[reference/Permissions]] | Workspace sandboxing and command whitelist |
