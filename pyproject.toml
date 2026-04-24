@@ -1,0 +1,17 @@
+[project]
+name = "local-codex"
+version = "0.1.0"
+dependencies = [
+    "rich",
+    "prompt-toolkit",
+    "langchain-ollama",
+    "python-dotenv",
+    "Pillow",
+    "numpy"
+]
+
+[project.scripts]
+codemitra = "app.main:main"
+
+[tool.setuptools]
+packages = ["app", "misc"]
