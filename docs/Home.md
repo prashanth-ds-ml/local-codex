@@ -46,13 +46,16 @@ You type naturally → Chat LLM decides what to do
 
 - [x] CLI with Rich banner
 - [x] Chat loop (`qwen2.5-coder:7b`)
-- [x] Filesystem agent (`qwen3.5:latest`) with 10 tools
-- [x] Permission guard
-- [x] Structured response templates
-- [ ] Code reader agent
-- [ ] Shell agent
-- [ ] Planner agent
-- [ ] Memory / persistence
+- [x] Filesystem agent with 10 tools + permission guard
+- [x] Shell agent — commands, whitelist, streaming output
+- [x] Code reader agent — 5 read-only tools, path sandbox
+- [x] Planner agent — multi-step plans routed to sub-agents
+- [x] Brainstorm loop — clarifying Q&A before `/plan`
+- [x] Memory vault — `.codemitra/` with context, plan, activity log
+- [ ] Diff preview before bulk file writes
+- [ ] Test loop (`/fix` + pytest auto-retry)
+- [ ] `/explain` and `/fix` slash command shortcuts
+- [ ] Project auto-detect on startup
 
 > [!tip] Start here
 > If you're setting up for the first time, go to [[Setup]].

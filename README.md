@@ -16,10 +16,14 @@ It is built with the same ideas behind Claude Code and GitHub Copilot, but entir
 
 - **Rich terminal UI** — ASCII avatar, styled panels, structured agent output
 - **Chat** — powered by `qwen2.5-coder:7b`, optimised for code
-- **Filesystem agent** — creates folders, files, `.venv`, installs packages
-- **Dual-model routing** — chat LLM routes tasks to agent LLM (`qwen3.5:latest`) which actually supports structured tool calling
+- **Brainstorm loop** — `/plan` asks clarifying questions before generating a plan (ask before acting, not guess)
+- **Planner agent** — breaks large goals into ordered steps, routes each step to the right agent
+- **Filesystem agent** — creates folders, files, `.venv`, installs packages (10 tools)
+- **Shell agent** — runs commands, captures output, streams results back to the LLM
+- **Code reader agent** — reads and understands codebases (5 read-only tools)
+- **Memory vault** — `.codemitra/` folder with session log, project context, and active plan
+- **Dual-model routing** — chat LLM detects intent and delegates to the right agent
 - **Permission guard** — workspace sandboxing + command whitelist
-- **10 tools** — create, read, move, delete, venv, install, shell
 
 ---
 
@@ -66,11 +70,16 @@ codemitra> exit
 ```
 local-codex/
 ├── app/
-│   ├── main.py          # CLI entry point and chat loop
+│   ├── main.py          # CLI entry point and chat REPL
 │   ├── llm.py           # Model definitions (chat + agent)
-│   ├── prompts.py       # System prompts
+│   ├── prompts.py       # System prompts and routing rules
+│   ├── memory.py        # .codemitra/ vault (context, plan, activity log)
 │   └── agents/
+│       ├── brainstorm.py  # Clarifying Q&A loop before /plan
 │       ├── filesystem.py  # 10 tools + permission guard + agent loop
+│       ├── shell.py       # Command execution + whitelist + streaming
+│       ├── reader.py      # 5 read-only tools for codebase understanding
+│       ├── planner.py     # Step-by-step plan + per-step routing
 │       └── response.py    # ToolResult, AgentResponse, Rich renderer
 ├── misc/
 │   └── ascii.py         # ASCII art generator for the banner
@@ -88,15 +97,19 @@ Full docs live in [`docs/`](docs/Home.md).
 
 ## Roadmap
 
-See [[Roadmap]] for the full phase-by-phase build plan.
+See [`docs/Roadmap.md`](docs/Roadmap.md) for the full phase-by-phase build plan.
 
 | Phase | Description | Status |
 |---|---|---|
 | 1–4 | Foundation, chat, filesystem agent, routing | ✅ Done |
-| 5 | Code reader agent | ⬜ Next |
-| 6 | Shell agent | ⬜ Planned |
-| 7 | Planner / orchestrator | ⬜ Planned |
-| 8 | Memory | ⬜ Planned |
+| 5 | Code reader agent | ✅ Done |
+| 6 | Shell agent | ✅ Done |
+| 7 | Planner agent + brainstorm loop | ✅ Done |
+| 8 | Memory vault | ✅ Done |
+| 9 | Diff preview before writes | 🔲 Next |
+| 10 | Test loop (`/fix` + pytest auto-retry) | 🔲 Planned |
+| 11 | `/explain` and `/fix` slash commands | 🔲 Planned |
+| 12 | Project auto-detect on startup | 🔲 Planned |
 
 ---
 

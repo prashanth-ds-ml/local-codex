@@ -111,6 +111,16 @@ flowchart TD
 - Describes all four routing tools (`setup_project`, `run_command`, `read_codebase`, `execute_plan`) with explicit routing rules
 - Rules: file ops → `setup_project`; execution → `run_command`; list/inspect → `read_codebase`; plan next step → `execute_plan`; questions → direct answer; call tools immediately
 
+### `app/agents/brainstorm.py` — Pre-plan clarification agent
+
+- `run(llm, goal, console)` → `str` — main entry point; returns accumulated Q&A context string
+- Up to 5 rounds, max 3 questions per round
+- Parses model output for `THINKING:`, `QUESTIONS:`, `READY_TO_PLAN` markers
+- Returns early when model is confident it has enough context
+- Called by `_cmd_plan()` in `main.py` before `create_plan()`
+
+---
+
 ### `app/agents/filesystem.py` — Filesystem agent
 
 Tools (13):
@@ -165,7 +175,7 @@ Key components:
 
 - `Step(index, text, done)` / `Plan(goal, steps)` — data model; `.pending`, `.completed`, `.is_done`
 - `_parse_plan(workspace)` → `Plan | None` — reads `.codemitra/plan.md` into the data model
-- `create_plan(llm, goal, workspace)` → `Plan` — LLM generates numbered steps; writes `plan.md`
+- `create_plan(llm, goal, workspace, context="")` → `Plan` — LLM generates numbered steps; writes `plan.md`; `context` is the brainstorm Q&A string
 - `render(plan)` → Panel — yellow (in progress) or green (done) bordered table of steps
 - `_route_step(llm, step_text)` → `"filesystem" | "shell" | "reader" | "direct"` — LLM routing
 - `execute_step(llm, step, workspace, console)` → `str` — runs one step via the appropriate agent

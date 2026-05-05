@@ -58,45 +58,84 @@ CodeMitra is being built incrementally, one capability layer at a time. Each pha
 
 ---
 
-## Phase 5 — Code reader agent ⬜
+## Phase 5 — Code reader agent ✅
 
-Tools to add / reuse:
-- [ ] `read_file` (reuse)
-- [ ] `list_directory` (reuse)
-- [ ] `search_in_files` — grep pattern across a directory
-- [ ] `get_file_tree` — full nested directory tree as text
+- [x] `read_file` (reuse)
+- [x] `list_directory` (reuse)
+- [x] `search_in_files` — grep pattern across a directory
+- [x] `get_file_tree` — full nested directory tree as text
+- [x] `find_definition` — locate def/class/constant by name
+- [x] `grep_symbol` — find all usages of a symbol
 
 Agent behaviour:
-- [ ] System prompt tuned for code understanding
-- [ ] Can answer: "what does X do?", "find where Y is called", "summarise this file"
-- [ ] Routing: chat LLM detects code-reading intent → delegates
+- [x] System prompt tuned for code understanding
+- [x] Can answer: "what does X do?", "find where Y is called", "summarise this file"
+- [x] Routing: chat LLM detects code-reading intent → delegates
 
 ---
 
-## Phase 6 — Shell agent ⬜
+## Phase 6 — Shell agent ✅
 
-- [ ] `run_command` (reuse, extended)
-- [ ] Streaming stdout back to the LLM mid-run
-- [ ] Timeout + kill handling
-- [ ] Routing: "run the tests", "start the server", "build the project"
-
----
-
-## Phase 7 — Planner agent ⬜
-
-- [ ] Takes a large, multi-step task
-- [ ] Breaks it into an ordered list of sub-tasks
-- [ ] Routes each sub-task to the correct agent (filesystem / code reader / shell)
-- [ ] Collects results, handles partial failures, writes a summary
+- [x] `run_command` (reuse, extended)
+- [x] Streaming stdout back to the LLM mid-run
+- [x] Timeout + kill handling
+- [x] Command whitelist (`python`, `pytest`, `git`, `npm`, `ruff`, `mypy`, `black`, `uvicorn`, …)
+- [x] `ShellResult` — exit code, output, timed_out, denied flags
+- [x] Routing: "run the tests", "start the server", "build the project"
 
 ---
 
-## Phase 8 — Memory ⬜
+## Phase 7 — Planner agent ✅
 
-- [ ] Session log saved to `.codemitra/history.jsonl`
-- [ ] Project context file `.codemitra/context.md` (auto-updated)
-- [ ] Load context on startup so the LLM knows the project
-- [ ] Cross-session memory: "last time we worked on X"
+- [x] Takes a large, multi-step task
+- [x] Breaks it into an ordered list of sub-tasks
+- [x] Routes each sub-task to the correct agent (filesystem / code reader / shell)
+- [x] Collects results, handles partial failures, writes a summary
+- [x] Writes and reads `.codemitra/plan.md` with completion markers
+
+---
+
+## Phase 8 — Memory ✅
+
+- [x] `.codemitra/activity.md` — append-only activity log
+- [x] `.codemitra/context.md` — project context (editable)
+- [x] `.codemitra/plan.md` — active plan with step checkboxes
+- [x] `.codemitra/README.md` — vault index
+- [x] Load context on startup so the LLM knows the project
+- [x] Cross-session memory: context persists between sessions
+
+---
+
+## Phase 9 — Brainstorm loop ✅
+
+- [x] `/plan` runs clarifying Q&A before generating plan steps
+- [x] Up to 5 rounds of questions (max 3 questions per round)
+- [x] `READY_TO_PLAN` signal when model has enough context
+- [x] Full Q&A context passed to `create_plan()` for specific steps
+
+---
+
+## Phase 10 — Diff preview + test loop 🔲
+
+- [ ] Show diff/summary before bulk file writes (confirm Y/N)
+- [ ] `run pytest → read failures → generate fix → run again` loop (max 3 attempts)
+- [ ] `/fix <paste error>` slash command shortcut
+
+---
+
+## Phase 11 — Slash command shortcuts 🔲
+
+- [ ] `/explain <file>` — explain what a file does
+- [ ] `/fix <error>` — paste traceback, get fix applied
+- [ ] `/review` — run reviewer agent on changed files
+
+---
+
+## Phase 12 — Project auto-detect 🔲
+
+- [ ] On startup, scan README + entry points + file tree
+- [ ] Inject as context so LLM knows the project without being told
+- [ ] Skip manual `/context` load for known project layouts
 
 ---
 
@@ -107,8 +146,12 @@ Agent behaviour:
 | 1 | Foundation | ✅ Done |
 | 2 | Chat core | ✅ Done |
 | 3 | Filesystem agent | ✅ Done |
-| 4 | Routing | ⚠️ Partial |
-| 5 | Code reader agent | ⬜ Next |
-| 6 | Shell agent | ⬜ Planned |
-| 7 | Planner agent | ⬜ Planned |
-| 8 | Memory | ⬜ Planned |
+| 4 | Routing | ✅ Done |
+| 5 | Code reader agent | ✅ Done |
+| 6 | Shell agent | ✅ Done |
+| 7 | Planner agent | ✅ Done |
+| 8 | Memory vault | ✅ Done |
+| 9 | Brainstorm loop | ✅ Done |
+| 10 | Diff preview + test loop | 🔲 Next |
+| 11 | Slash command shortcuts | 🔲 Planned |
+| 12 | Project auto-detect | 🔲 Planned |

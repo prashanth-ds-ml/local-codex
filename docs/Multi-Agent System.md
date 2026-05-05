@@ -22,21 +22,22 @@ flowchart TD
 
     subgraph Orchestrator["Orchestrator Layer"]
         Conversation["Conversation Agent\nUnderstands user, asks questions"]
+        Brainstorm["Brainstorm Agent\nClarifying Q&A before planning"]
         Planner["Planner Agent\nBuilds phased implementation plan"]
     end
 
+    Conversation --> Brainstorm --> Planner
+
     Planner --> Filesystem
-    Planner --> CodeWriter
     Planner --> CodeReader
     Planner --> Shell
     Planner --> Reviewer
 
     subgraph Execution["Execution Layer"]
         Filesystem["Filesystem Agent\n✅ Built\nFolders, files, venv, packages"]
-        CodeWriter["Code Writer Agent\n🔨 Next\nWrites code files from spec"]
-        CodeReader["Code Reader Agent\n🔨 Next\nReads and understands codebase"]
-        Shell["Shell Agent\n🔨 Planned\nRuns commands, tests, builds"]
-        Reviewer["Reviewer Agent\n🔨 Planned\nReviews code quality"]
+        CodeReader["Code Reader Agent\n✅ Built\nReads and understands codebase"]
+        Shell["Shell Agent\n✅ Built\nRuns commands, tests, builds"]
+        Reviewer["Reviewer Agent\n🔲 Planned\nReviews code quality"]
     end
 ```
 
@@ -45,7 +46,7 @@ flowchart TD
 ## Each agent in detail
 
 ### Conversation Agent
-**Status:** Partial (current main chat loop)
+**Status:** ✅ Built (main chat loop)
 **Model:** `qwen2.5-coder:7b`
 
 Responsibilities:
@@ -59,8 +60,35 @@ This is the only agent the user ever directly interacts with. Everything else is
 
 ---
 
+### Brainstorm Agent
+**Status:** ✅ Built (Phase 9)
+**Model:** same model as Conversation Agent
+
+Responsibilities:
+- Runs before every `/plan` command
+- Generates up to 3 clarifying questions per round (max 5 rounds)
+- Detects when it has enough context (`READY_TO_PLAN` signal)
+- Returns full Q&A context string — passed to `create_plan()` so steps are specific, not generic
+
+```
+/plan build a REST API
+  ↓
+Brainstorm Agent asks:
+  1. What framework? (FastAPI / Flask / Django)
+  2. Do you need authentication?
+  3. Which database?
+  ↓
+User answers
+  ↓
+Planner receives answers → generates specific, actionable steps
+```
+
+This mirrors exactly how Claude Code works — ask before acting.
+
+---
+
 ### Planner Agent
-**Status:** ⬜ Planned (Phase 7)
+**Status:** ✅ Built (Phase 7)
 **Model:** `qwen3.5:latest`
 
 Responsibilities:
@@ -98,45 +126,28 @@ See [[agents/Filesystem Agent]] for full documentation.
 
 ---
 
-### Code Writer Agent
-**Status:** 🔨 Next (Phase 5)
-**Model:** `qwen2.5-coder:7b` for generation + `qwen3.5:latest` for tool calling
-
-Responsibilities:
-- Receives a spec (what to write, where to write it)
-- Generates code using the code-specialist model
-- Uses filesystem tools to write the files
-- Can iterate based on feedback from the Reviewer Agent
-
-Tools needed:
-- `create_file` (reuse)
-- `read_file` (reuse — to check existing code before writing)
-- `write_code_block` (new — replaces a specific block in an existing file)
-- `insert_at_line` (new — inserts code at a specific line)
-
----
-
 ### Code Reader Agent
-**Status:** 🔨 Next (Phase 5)
+**Status:** ✅ Built (Phase 5)
 **Model:** `qwen2.5-coder:7b`
 
 Responsibilities:
 - Reads the codebase and builds an understanding of its structure
 - Answers questions: "what does X do?", "where is Y defined?"
 - Identifies patterns, dependencies, entry points
-- Feeds context to the Planner and Code Writer agents
+- Feeds context to the Planner and other agents
 
-Tools needed:
-- `read_file` (reuse)
-- `list_directory` (reuse)
-- `get_file_tree` (new — full nested directory tree)
-- `search_in_files` (new — grep pattern across project)
-- `get_symbol_definition` (new — find where a function/class is defined)
+Tools (all read-only):
+- `read_file` — pageable file reader with line-number gutter
+- `list_directory` — directory listing
+- `get_file_tree` — full nested directory tree (skips noise dirs)
+- `search_in_files` — regex search across files with glob filter
+- `find_definition` — locate `def`/`class`/constant by name
+- `grep_symbol` — find all usages of a symbol
 
 ---
 
 ### Shell Agent
-**Status:** 🔨 Planned (Phase 6)
+**Status:** ✅ Built (Phase 6)
 **Model:** `qwen3.5:latest`
 
 Responsibilities:
@@ -145,16 +156,15 @@ Responsibilities:
 - Starts/stops servers
 - Feeds command output back to the Planner or Code Writer
 
-Tools needed:
-- `run_command` (reuse, extended)
-- `stream_output` (new — stream stdout in real time)
-- `check_process` (new — is a process running?)
-- `kill_process` (new — stop a running process)
+Tools:
+- `run_shell` — execute whitelisted commands with timeout
+- Streaming stdout back to the LLM mid-run
+- `ShellResult` — exit code, output lines, timed_out, denied flags
 
 ---
 
 ### Reviewer Agent
-**Status:** 🔨 Planned (Phase 7)
+**Status:** 🔲 Planned
 **Model:** `qwen2.5-coder:7b`
 
 Responsibilities:
