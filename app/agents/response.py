@@ -31,6 +31,8 @@ class AgentResponse:
     request: str
     steps: list[ToolResult] = field(default_factory=list)
     summary: str = ""
+    tokens_in: int = 0
+    tokens_out: int = 0
 
     @property
     def ok_count(self) -> int:
@@ -60,6 +62,26 @@ def _extract_label(tool: str, args: dict) -> str:
             return f"{cmd}  (in {cwd})" if cwd and cwd != "." else cmd
         case _:
             return args.get("path", args.get("project_path", ""))
+
+
+# ─── Panel title ──────────────────────────────────────────────────────────────
+
+def _panel_title(response: AgentResponse) -> str:
+    """Derive a context-aware title from the dominant tool called."""
+    tools_used = {s.tool for s in response.steps}
+    if tools_used & {"git_status", "git_diff", "git_commit"}:
+        return "Git"
+    if tools_used & {"install_packages", "create_venv"}:
+        return "Installing packages"
+    if tools_used & {"delete_file", "delete_folder"}:
+        return "Removing files"
+    if tools_used & {"move_file"}:
+        return "Moving files"
+    if tools_used & {"create_file", "create_folder"}:
+        return "Creating files"
+    if tools_used & {"read_file", "list_directory"}:
+        return "Reading project"
+    return "Setup Agent"
 
 
 # ─── Renderer ─────────────────────────────────────────────────────────────────
@@ -92,7 +114,9 @@ def render(response: AgentResponse) -> Panel:
                 label = Text(step.label, style="cyan")
             else:
                 icon = Text("✗", style="bold red")
-                label = Text(step.output.lstrip("✗").strip(), style="red")
+                # On failure: first line of output only (no walls of text)
+                first_line = step.output.lstrip("✗").strip().splitlines()[0]
+                label = Text(first_line[:120], style="red")
 
             grid.add_row(icon, step.tool, label)
 
@@ -119,7 +143,7 @@ def render(response: AgentResponse) -> Panel:
 
     return Panel(
         Group(*parts),
-        title="[bold cyan]Setup Agent[/bold cyan]",
+        title=f"[bold cyan]{_panel_title(response)}[/bold cyan]",
         border_style="cyan",
         padding=(1, 2),
     )

@@ -5,13 +5,16 @@ dependencies = [
     "rich",
     "prompt-toolkit",
     "langchain-ollama",
+    "langchain-core",
     "python-dotenv",
+    "typer",
+    "ollama",
     "Pillow",
     "numpy"
 ]
 
 [project.scripts]
-codemitra = "app.main:main"
+codemitra = "app.main:cli"
 
 [tool.setuptools]
 packages = ["app", "misc"]

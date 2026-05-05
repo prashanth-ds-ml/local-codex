@@ -8,7 +8,7 @@ aliases: [System Design, How it works]
 
 ## Overview
 
-CodeMitra uses a **dual-model, multi-agent** architecture. The chat model handles conversation; the agent model handles tool execution. Neither touches the filesystem directly — all real actions go through typed Python functions (tools).
+CodeMitra uses a **single shared model, multi-agent** architecture. One LLM instance is bound with four routing tools (`setup_project`, `run_command`, `read_codebase`, `execute_plan`). Each routing tool hands off to a dedicated sub-agent that runs its own LLM tool loop. No real action (filesystem, shell, or file reading) happens outside a tool function.
 
 ---
 
@@ -20,65 +20,182 @@ flowchart TD
 
     subgraph MainLoop["Main Loop (main.py)"]
         direction TB
-        ChatLLM["Chat LLM\nqwen2.5-coder:7b"]
+        ChatLLM["Shared LLM\n(model selected at startup)"]
+        UX["UX Layer\nsmart prompt · hint bar · tab completion\nMarkdown rendering · error logging\nthinking panel · token bar · auto-compact"]
     end
 
-    MainLoop -->|normal reply| Display([Rich panel])
+    MainLoop -->|direct answer| Display([Rich panel / Markdown])
 
     MainLoop -->|tool call: setup_project| FilesystemAgent
+    MainLoop -->|tool call: run_command| ShellAgent
+    MainLoop -->|tool call: read_codebase| ReaderAgent
+    MainLoop -->|tool call: execute_plan| PlannerAgent
 
     subgraph FilesystemAgent["Filesystem Agent (agents/filesystem.py)"]
         direction TB
-        AgentLLM["Agent LLM\nqwen3.5:latest"]
-        Guard["Permission Guard"]
-        Tools["Tools\n10 functions"]
-        AgentLLM -->|tool calls| Guard
-        Guard -->|allowed| Tools
-        Guard -->|denied| Error([Error message])
-        Tools -->|results| AgentLLM
+        FSLLM["LLM tool loop"]
+        Guard["PermissionGuard\n(path sandbox)"]
+        FSTools["13 tools\ncreate/read/list/delete/move\nvenv · packages · git"]
+        FSLLM -->|tool calls| Guard
+        Guard -->|allowed| FSTools
+        Guard -->|destructive + confirm_fn| UserConfirm1([User Y/N])
+        Guard -->|denied| DeniedMsg([Skipped message])
+        FSTools -->|results| FSLLM
     end
 
-    FilesystemAgent --> ResponseTemplate["Response Template\n(agents/response.py)"]
+    subgraph ShellAgent["Shell Agent (agents/shell.py)"]
+        direction TB
+        SHLLM["LLM tool loop"]
+        Whitelist["Command whitelist\n(python, pytest, git, npm …)"]
+        Exec["execute()\nthreaded stdout reader"]
+        SHLLM -->|run_shell| Whitelist
+        Whitelist -->|confirm_fn| UserConfirm2([User Y/N])
+        Whitelist -->|allowed| Exec
+        Exec -->|ShellResult| SHLLM
+    end
+
+    subgraph ReaderAgent["Code Reader Agent (agents/reader.py)"]
+        direction TB
+        RLLM["LLM tool loop"]
+        RSandbox["Path sandbox\n(read-only, workspace only)"]
+        RTools["5 read-only tools\nget_file_tree · read_file\nsearch_in_files · find_definition\ngrep_symbol"]
+        RLLM -->|tool calls| RSandbox
+        RSandbox -->|allowed| RTools
+        RTools -->|results| RLLM
+    end
+
+    subgraph PlannerAgent["Planner Agent (agents/planner.py)"]
+        direction TB
+        PlanCreate["create_plan()\nLLM generates numbered steps\nwrites .codemitra/plan.md"]
+        StepRouter["_route_step()\nLLM routes step →\nfilesystem | shell | reader | direct"]
+        StepExec["execute_step()"]
+        PlanCreate --> StepRouter --> StepExec
+    end
+
+    FilesystemAgent --> ResponseTemplate["Response template\n(agents/response.py)\ndynamic panel title"]
+    ShellAgent --> ShellRender["Shell panel\n(agents/shell.py)"]
+    ReaderAgent --> ReaderRender["Reader panel\n(magenta border)"]
+    PlannerAgent --> PlannerRender["Plan panel\n(yellow/green border)"]
     ResponseTemplate --> Display
+    ShellRender --> Display
+    ReaderRender --> Display
+    PlannerRender --> Display
+
+    Memory[".codemitra/ vault\nactivity · context · plan · README"] --> MainLoop
 ```
 
 ---
 
 ## Component breakdown
 
-### `app/main.py` — Entry point and main loop
+### `app/main.py` — CLI entry point and chat REPL
 
-- Renders the banner
-- Creates both LLM instances
-- Binds `setup_project` routing tool to the chat LLM
-- Runs the chat loop: reads input → invokes LLM → handles response or tool calls
+- `codemitra init` — scaffolds `.codemitra/` memory vault (4 markdown files)
+- `codemitra chat` — starts the interactive chat loop
+- Picks model at startup (lists local Ollama models)
+- Binds four routing tools to the shared LLM: `setup_project`, `run_command`, `read_codebase`, `execute_plan`
+- Slash commands: `/init`, `/run <cmd>`, `/plan <goal>`, `/memory`, `/context`, `/reset`, `/compact`, `/help`
+- UX layer: smart prompt `[project] (model)>`, hint bar, tab completion via `WordCompleter`, turn separator `Rule`, Markdown/syntax highlighting in LLM responses, `_friendly_error()` with `.codemitra/errors.log`
+- Streaming: `main_llm.stream()` with automatic fallback to `invoke()` when tool calls are detected
+- Thinking panel: `<think>…</think>` blocks extracted and shown in a dim panel before the reply
+- Token bar: shows per-turn and session token totals with a fill gauge; `⚡ /compact` hint at 80% of threshold
+- Auto-compact: when session tokens exceed `auto_compact_threshold`, LLM summarises history into a fresh message list; also triggered by `/compact`
 
 ### `app/llm.py` — Model layer
 
-Two functions:
+- `get_llm(model, temperature)` — returns a `ChatOllama` instance for the selected model
+- One shared LLM is used for all layers (main chat, filesystem agent, shell agent)
 
-| Function | Model | Purpose |
-|---|---|---|
-| `get_chat_llm()` | `qwen2.5-coder:7b` | Chat, code explanation, code generation |
-| `get_agent_llm()` | `qwen3.5:latest` | Tool calling, agent execution |
+### `app/prompts.py` — System prompt
+
+- Describes all four routing tools (`setup_project`, `run_command`, `read_codebase`, `execute_plan`) with explicit routing rules
+- Rules: file ops → `setup_project`; execution → `run_command`; list/inspect → `read_codebase`; plan next step → `execute_plan`; questions → direct answer; call tools immediately
 
 ### `app/agents/filesystem.py` — Filesystem agent
 
-- Defines all 10 tools as `@tool` decorated functions
-- `PermissionGuard` sits in front of every tool call
-- `run(llm, request)` — the agent loop: invoke → tool calls → execute → feed results back → repeat until done → return `AgentResponse`
-- `make_routing_tool(llm)` — wraps the agent as a single tool the chat LLM can call
+Tools (13):
 
-### `app/agents/response.py` — Response templates
+| Category | Tools |
+|---|---|
+| Files | `create_file`, `read_file`, `delete_file`, `move_file` |
+| Directories | `create_folder`, `list_directory`, `delete_folder` |
+| Environment | `create_venv`, `install_packages` |
+| Git | `git_status`, `git_diff`, `git_commit` |
+| Info | `get_cwd` |
 
-- `ToolResult` — one tool execution (tool name, args, output, ok/fail)
-- `AgentResponse` — all steps + final summary + counts
-- `render(response)` — builds a Rich Panel with steps table, summary, and footer
+Key components:
+- `PermissionGuard` — path sandbox; every tool call is checked against the configured workspace
+- `_DESTRUCTIVE_TOOLS = {"delete_file", "delete_folder", "move_file"}` — guarded by `confirm_fn`; confirmation check lives inside the tool itself so it applies whether called via agent loop or directly
+- `configure(workspace, confirm_fn)` — sets workspace and optional confirmation callback
+- `run(llm, request, console)` → `AgentResponse` — LLM tool loop
+- `make_routing_tool(llm, console)` — wraps the agent as `setup_project` tool
+
+### `app/agents/shell.py` — Shell agent
+
+- `_DEFAULT_COMMANDS` whitelist: `python`, `pytest`, `git`, `npm`, `ruff`, `mypy`, `black`, `uvicorn`, …
+- `ShellConfig` — workspace, allowed commands, default timeout, stream flag, confirm callback
+- `ShellResult` — command, cwd, exit code, output lines, timed_out, denied flags; `.ok`, `.output`, `.tail`, `.to_llm_summary()`
+- `execute(command, cwd, timeout, console)` — threaded stdout reader, streams live output, enforces timeout
+- `run_shell` — `@tool` for LangChain tool loop
+- `run_agent(llm, request, console)` → `str` — NL shell request loop
+- `make_routing_tool(llm, console)` — wraps as `run_command` tool
+- `render(result)` — Rich Panel (green OK, red FAILED, yellow TIMEOUT)
+- `configure(workspace, allowed_commands, default_timeout, stream_to_console, confirm_fn)` — module-level state
+
+### `app/agents/reader.py` — Code Reader agent (read-only)
+
+Tools (5, all read-only):
+
+| Tool | Purpose |
+|---|---|
+| `get_file_tree` | Recursive directory listing, skips noise dirs (`.venv`, `__pycache__`, `node_modules`, …) |
+| `read_file` | Pageable file reader (200-line cap, line-number gutter) |
+| `search_in_files` | Regex search across files with glob filter |
+| `find_definition` | Locate `def`/`class`/constant declarations by name |
+| `grep_symbol` | Find all usages of a symbol across the workspace |
+
+Key components:
+- Path sandbox via `_check(path)` — never reads outside the configured workspace
+- `configure(workspace)` — sets workspace (no `confirm_fn` needed — read-only)
+- `run(llm, user_request, console)` → `ReaderResponse` — LLM tool loop
+- `make_routing_tool(llm, console)` — wraps as `read_codebase` tool
+- `render(response)` — magenta-bordered Rich Panel
+
+### `app/agents/planner.py` — Planner agent
+
+- `Step(index, text, done)` / `Plan(goal, steps)` — data model; `.pending`, `.completed`, `.is_done`
+- `_parse_plan(workspace)` → `Plan | None` — reads `.codemitra/plan.md` into the data model
+- `create_plan(llm, goal, workspace)` → `Plan` — LLM generates numbered steps; writes `plan.md`
+- `render(plan)` → Panel — yellow (in progress) or green (done) bordered table of steps
+- `_route_step(llm, step_text)` → `"filesystem" | "shell" | "reader" | "direct"` — LLM routing
+- `execute_step(llm, step, workspace, console)` → `str` — runs one step via the appropriate agent
+- `run_plan(llm, workspace, console, max_steps)` → `str` — executes the next pending step(s)
+- `make_routing_tool(llm, workspace, console)` — wraps as `execute_plan` tool
+
+
+
+- `ToolResult(tool, args, output, ok)` — one tool execution step
+- `AgentResponse(steps, summary)` — full agent run; `.ok_count`, `.fail_count`
+- `_panel_title(response)` — dynamic title based on tools used (Git, Installing packages, Removing files, …)
+- `render(response)` — Rich Panel with steps table, summary, dynamic title
+
+### `app/memory.py` — Obsidian-compatible memory vault
+
+Files in `<workspace>/.codemitra/`:
+
+| File | Purpose |
+|---|---|
+| `activity.md` | Append-only log of tool actions |
+| `context.md` | Current project context (editable) |
+| `plan.md` | Numbered task plan with completion markers |
+| `README.md` | Vault index |
+
+Key functions: `init_memory(workspace)`, `append_activity()`, `load_context()`, `update_context()`, `load_plan()`, `write_plan()`, `mark_step_done()`
 
 ### `misc/ascii.py` — Banner art
 
 - Converts an image to ASCII art using Pillow + NumPy
-- Used in `show_banner()` to render the monkey avatar
+- Used in `show_banner()` to render the CodeMitra avatar
 
 ---
 
@@ -88,43 +205,89 @@ Two functions:
 sequenceDiagram
     participant U as User
     participant M as Main Loop
-    participant C as Chat LLM
-    participant A as Agent LLM
+    participant C as Shared LLM
+    participant FA as Filesystem Agent
+    participant SA as Shell Agent
+    participant RA as Code Reader
+    participant PA as Planner
     participant T as Tools
 
-    U->>M: "create a FastAPI project"
-    M->>C: invoke(messages + setup_project schema)
-    C-->>M: tool_call: setup_project(request=...)
-    M->>A: filesystem.run(agent_llm, request)
-    A->>T: create_folder("myapi")
-    T-->>A: ✓ Created folder: myapi
-    A->>T: create_venv("myapi")
-    T-->>A: ✓ Created .venv in myapi
-    A->>T: install_packages("myapi", ["fastapi"])
-    T-->>A: ✓ Installed fastapi
-    A-->>M: AgentResponse(steps=[...], summary="...")
-    M->>U: render(AgentResponse) → Rich panel
+    U->>M: "create a FastAPI project and run it"
+    M->>C: stream(messages + [setup_project, run_command, read_codebase, execute_plan] schemas)
+    C-->>M: tool_call: setup_project(request="create FastAPI project")
+    M->>FA: filesystem.run(llm, request)
+    FA->>T: create_folder / create_file / install_packages
+    T-->>FA: ✓ results
+    FA-->>M: AgentResponse → Rich panel displayed
+    M->>C: stream(messages + agent summary)
+    C-->>M: tool_call: run_command(request="run uvicorn")
+    M->>SA: shell.run_agent(llm, request)
+    SA->>T: run_shell("uvicorn main:app --reload")
+    T-->>SA: ShellResult(exit_code=0)
+    SA-->>M: summary string → Shell panel displayed
+    M->>U: both panels shown
+
+    U->>M: "what does main.py do?"
+    M->>C: stream(messages)
+    C-->>M: tool_call: read_codebase(request="explain main.py")
+    M->>RA: reader.run(llm, request)
+    RA->>T: read_file("main.py") / search_in_files(…)
+    T-->>RA: file contents / matches
+    RA-->>M: ReaderResponse → magenta panel displayed
+    M->>U: findings shown
+
+    U->>M: "/plan build a REST API"
+    M->>PA: planner.create_plan(llm, goal)
+    PA-->>M: Plan(steps=[…]) written to plan.md
+    M->>U: yellow plan panel shown
+
+    U->>M: "continue"
+    M->>C: stream(messages)
+    C-->>M: tool_call: execute_plan()
+    M->>PA: planner.run_plan(llm, workspace)
+    PA->>FA: execute step via filesystem agent
+    FA-->>PA: step result
+    PA-->>M: step summary
+    M->>U: updated plan panel shown
 ```
+
+---
+
+## Test suite
+
+Tests live in `tests/`. Run with `python -m pytest tests/ -v`.
+
+| File | Coverage |
+|---|---|
+| [tests/test_filesystem.py](../tests/test_filesystem.py) | PermissionGuard, destructive confirm, create_file, list_directory |
+| [tests/test_shell.py](../tests/test_shell.py) | Whitelist, confirm_fn, ShellResult, render |
+| [tests/test_response.py](../tests/test_response.py) | `_panel_title`, ToolResult.ok, AgentResponse counts, step truncation |
+| [tests/test_main_ux.py](../tests/test_main_ux.py) | `_friendly_error`, `_extract_command`, slash commands, `_make_completer` |
+| [tests/test_prompts.py](../tests/test_prompts.py) | System prompt content and routing rules |
+| [tests/test_reader.py](../tests/test_reader.py) | `get_file_tree`, `read_file`, `search_in_files`, `find_definition`, `grep_symbol`, path guard |
+| [tests/test_planner.py](../tests/test_planner.py) | `_parse_plan`, `render`, Step model, `run_plan` guards, `auto_compact_threshold` config |
 
 ---
 
 ## Design decisions
 
-### Why two models?
+### Why one shared model?
 
-`qwen2.5-coder:7b` is specialised for code and gives better chat/generation responses. But it does not support structured tool calling via Ollama's API — it outputs tool calls as plain text. `qwen3.5:latest` does support structured tool calling properly. Using both gives the best of each.
-
-See [[reference/Models]] for the full comparison.
+Early versions used two separate model instances (one for chat, one for agents). In practice, the same model works well for both roles — it already needs to do tool calling in the agent loops. Using one instance simplifies configuration: the user picks a model once at startup and it is used everywhere.
 
 ### Why a permission guard?
 
 Without a guard, the agent LLM could be instructed (by a malicious prompt or a hallucination) to delete arbitrary files or run dangerous commands. The guard enforces:
-- All paths must be inside a configured workspace directory
+- All paths must be inside the configured workspace directory
 - Only whitelisted executables can be run via `run_command`
-- Destructive tools are off by default
+- Destructive operations require explicit user confirmation
 
 See [[reference/Permissions]] for details.
 
+### Why move confirm_fn into the tool itself?
+
+Placing the confirmation check inside `delete_file`, `delete_folder`, and `move_file` (rather than only in the agent loop) ensures safety regardless of how the tool is called — agent loop, direct `.invoke()` in tests, or future CLI shortcuts. The guard is co-located with the action.
+
 ### Why structured response templates?
 
-Plain string returns from agents are hard to display consistently and hard to act on programmatically. `AgentResponse` separates the step log from the summary, makes success/failure counts explicit, and lets the renderer build a clean Rich panel regardless of what the agent did.
+Plain string returns from agents are hard to display consistently and hard to act on programmatically. `AgentResponse` separates the step log from the summary, makes success/failure counts explicit, and lets the renderer build a clean Rich panel with a dynamic title regardless of what the agent did.

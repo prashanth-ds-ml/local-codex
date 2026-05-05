@@ -14,14 +14,27 @@ from app.agents.response import AgentResponse, ToolResult
 
 # ─── Permissions ──────────────────────────────────────────────────────────────
 
-# Safe tools enabled by default. Destructive / shell tools are opt-in.
+# Safe tools enabled by default.
 _DEFAULT_TOOLS: set[str] = {
     "create_folder",
     "create_file",
     "read_file",
     "list_directory",
+    "delete_file",
+    "delete_folder",
+    "move_file",
     "create_venv",
     "install_packages",
+    "git_status",
+    "git_diff",
+    "git_commit",
+}
+
+# Tools that modify or destroy existing content — require user confirmation.
+_DESTRUCTIVE_TOOLS: set[str] = {
+    "delete_file",
+    "delete_folder",
+    "move_file",
 }
 
 # Executables allowed when run_command is enabled.
@@ -45,10 +58,13 @@ class PermissionGuard:
         workspace: str | None = None,
         allowed_tools: set[str] | None = None,
         allowed_commands: set[str] | None = None,
+        confirm_fn=None,
     ) -> None:
         self.workspace = pathlib.Path(workspace).resolve() if workspace else None
         self.allowed_tools = allowed_tools if allowed_tools is not None else set(_DEFAULT_TOOLS)
         self.allowed_commands = allowed_commands if allowed_commands is not None else set(_DEFAULT_COMMANDS)
+        # Callable(tool_name, args_dict) -> bool. None = auto-approve (no TTY).
+        self.confirm_fn = confirm_fn
 
     # ── Checks ────────────────────────────────────────────────────────────────
 
@@ -92,6 +108,7 @@ def configure(
     workspace: str | None = None,
     allowed_tools: set[str] | None = None,
     allowed_commands: set[str] | None = None,
+    confirm_fn=None,
 ) -> None:
     """
     Update the permission guard for this session.
@@ -112,6 +129,7 @@ def configure(
         workspace=workspace,
         allowed_tools=allowed_tools,
         allowed_commands=allowed_commands,
+        confirm_fn=confirm_fn,
     )
 
 
@@ -130,6 +148,9 @@ _SYSTEM_PROMPT = """You are the Filesystem Setup Agent inside CodeMitra.
 - create_venv      : create a Python .venv in a project directory
 - install_packages : install pip packages into .venv, or from requirements.txt
 - run_command      : run a whitelisted shell command in a given directory
+- git_status       : show working tree status (short format)
+- git_diff         : show unstaged or staged diff
+- git_commit       : stage all changes and create a commit
 
 Note: you will only receive the tools that are currently permitted.
 Do not attempt operations outside your available tools.
@@ -208,6 +229,8 @@ def delete_file(path: str) -> str:
     """Delete a single file at the given path."""
     if err := _guard.check_path(path):
         return err
+    if _guard.confirm_fn and not _guard.confirm_fn("delete_file", {"path": path}):
+        return "✗ Skipped: user declined delete_file"
     try:
         pathlib.Path(path).unlink(missing_ok=True)
         return f"✓ Deleted file: {path}"
@@ -220,6 +243,8 @@ def delete_folder(path: str) -> str:
     """Delete a folder and all its contents recursively."""
     if err := _guard.check_path(path):
         return err
+    if _guard.confirm_fn and not _guard.confirm_fn("delete_folder", {"path": path}):
+        return "✗ Skipped: user declined delete_folder"
     try:
         shutil.rmtree(path)
         return f"✓ Deleted folder: {path}"
@@ -232,6 +257,8 @@ def move_file(src: str, dest: str) -> str:
     """Move or rename a file or folder from src to dest."""
     if err := _guard.check_path(src, dest):
         return err
+    if _guard.confirm_fn and not _guard.confirm_fn("move_file", {"src": src, "dest": dest}):
+        return "✗ Skipped: user declined move_file"
     try:
         shutil.move(src, dest)
         return f"✓ Moved '{src}' → '{dest}'"
@@ -325,6 +352,59 @@ def run_command(command: str, cwd: str = ".") -> str:
         return f"✗ run_command failed: {exc}"
 
 
+# ─── Git tools ───────────────────────────────────────────────────────────────
+
+@tool
+def git_status(cwd: str = ".") -> str:
+    """Show the git working tree status (short format) for a repository."""
+    if err := _guard.check_path(cwd):
+        return err
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short", "--branch"],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        output = result.stdout.strip() or "(nothing to report)"
+        return f"✓ git status\n{output}" if result.returncode == 0 else f"✗ {result.stderr.strip()}"
+    except Exception as exc:
+        return f"✗ git_status failed: {exc}"
+
+
+@tool
+def git_diff(cwd: str = ".", staged: bool = False) -> str:
+    """Show the diff of unstaged changes (staged=False) or staged changes (staged=True)."""
+    if err := _guard.check_path(cwd):
+        return err
+    try:
+        args = ["git", "diff"]
+        if staged:
+            args.append("--staged")
+        result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+        output = result.stdout.strip() or "(no diff)"
+        return f"✓ git diff\n{output}" if result.returncode == 0 else f"✗ {result.stderr.strip()}"
+    except Exception as exc:
+        return f"✗ git_diff failed: {exc}"
+
+
+@tool
+def git_commit(cwd: str, message: str) -> str:
+    """Stage all changes (git add -A) and create a commit with the given message."""
+    if err := _guard.check_path(cwd):
+        return err
+    try:
+        add = subprocess.run(["git", "add", "-A"], cwd=cwd, capture_output=True, text=True)
+        if add.returncode != 0:
+            return f"✗ git add failed: {add.stderr.strip()}"
+        commit = subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        output = commit.stdout.strip() or commit.stderr.strip()
+        return f"✓ Committed: {message}\n{output}" if commit.returncode == 0 else f"✗ {output}"
+    except Exception as exc:
+        return f"✗ git_commit failed: {exc}"
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _pip(project_path: str) -> str:
@@ -354,6 +434,9 @@ _ALL_TOOLS = [
     create_venv,
     install_packages,
     run_command,
+    git_status,
+    git_diff,
+    git_commit,
 ]
 
 
@@ -372,7 +455,7 @@ def make_routing_tool(llm):
     return setup_project
 
 
-def run(llm, user_request: str) -> AgentResponse:
+def run(llm, user_request: str, console=None) -> AgentResponse:
     """Run the filesystem agent and return a structured AgentResponse."""
     active_tools = _guard.filter_tools(_ALL_TOOLS)
     tool_map = {t.name: t for t in active_tools}
@@ -387,6 +470,12 @@ def run(llm, user_request: str) -> AgentResponse:
 
     while True:
         response: AIMessage = llm_with_tools.invoke(messages)
+
+        # Accumulate token usage
+        meta = getattr(response, "usage_metadata", None) or {}
+        agent_response.tokens_in += meta.get("input_tokens", 0)
+        agent_response.tokens_out += meta.get("output_tokens", 0)
+
         messages.append(response)
 
         if not response.tool_calls:
@@ -394,8 +483,23 @@ def run(llm, user_request: str) -> AgentResponse:
             return agent_response
 
         for tc in response.tool_calls:
+            # Show live progress
+            if console is not None:
+                args_str = ", ".join(
+                    f"{k}={repr(str(v))[:50]}" for k, v in tc["args"].items()
+                )
+                console.print(
+                    f"  [dim cyan]⋯[/dim cyan] [cyan]{tc['name']}[/cyan][dim]({args_str})[/dim]"
+                )
+
             fn = tool_map.get(tc["name"])
-            output = fn.invoke(tc["args"]) if fn else f"✗ Unknown tool: {tc['name']}"
+            if fn is None:
+                output = f"✗ Unknown tool: {tc['name']}"
+            elif tc["name"] in _DESTRUCTIVE_TOOLS and _guard.confirm_fn is not None:
+                approved = _guard.confirm_fn(tc["name"], tc["args"])
+                output = fn.invoke(tc["args"]) if approved else f"✗ Skipped: user declined {tc['name']}"
+            else:
+                output = fn.invoke(tc["args"])
             agent_response.steps.append(
                 ToolResult(tool=tc["name"], args=tc["args"], output=str(output))
             )

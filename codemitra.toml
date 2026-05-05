@@ -1,0 +1,9 @@
+model = ""                   # legacy fallback; prefer local_model
+local_model = "qwen3.5:latest"
+codegen_model = "kimi-k2.5:cloud"
+temperature = 0.2
+memory_enabled = false
+require_diff_approval = false
+auto_compact_threshold = 8000
+ollama_local_base_url = "http://localhost:11434"
+ollama_cloud_base_url = "https://ollama.com"
