@@ -14,16 +14,28 @@ It is built with the same ideas behind Claude Code and GitHub Copilot, but entir
 
 ## Features
 
-- **Rich terminal UI** — ASCII avatar, styled panels, structured agent output
-- **Chat** — powered by `qwen2.5-coder:7b`, optimised for code
+- **Rich terminal UI** — clean startup screen, structured panels, persistent session toolbar
+- **Chat-first UX** — starts conversationally, then routes into tools and agents when the request needs it
 - **Brainstorm loop** — `/plan` asks clarifying questions before generating a plan (ask before acting, not guess)
 - **Planner agent** — breaks large goals into ordered steps, routes each step to the right agent
 - **Filesystem agent** — creates folders, files, `.venv`, installs packages (10 tools)
-- **Shell agent** — runs commands, captures output, streams results back to the LLM
+- **Shell agent** — runs commands, captures output, streams results back to the LLM, and can launch background tasks
 - **Code reader agent** — reads and understands codebases (5 read-only tools)
+- **Web agent** — native web search and page-reading with `/search` and `/open-url`
 - **Memory vault** — `.codemitra/` folder with session log, project context, and active plan
-- **Dual-model routing** — chat LLM detects intent and delegates to the right agent
-- **Permission guard** — workspace sandboxing + command whitelist
+- **Operator controls** — `/status`, `/context`, `/permissions`, `/model`, `/diff`, `/review`, `/fix`, `/resume`, `/hibernate`, `/tasks`
+- **CodeMitra skills** — workspace skill discovery via `skills/*/SKILL.md`, plus `/skills` and `/skills show <name>` to inspect the active pack
+- **Terminal operating surface** — bottom toolbar with mode, model, cwd, context load, and current task
+- **Composer ergonomics** — `Ctrl+G` opens the current prompt in your editor for longer inputs
+- **Permission guard** — workspace sandboxing, mode-based approvals, configurable roots and blocked tools
+- **Startup auto-detect** — derives a lightweight project brief from the workspace and injects it at startup
+
+## Current baseline
+
+- **Validated product baseline** — 337 passing tests
+- **Shipped workflow coverage** — bootstrap, understand, session lifecycle, plan lifecycle, safe edit, fix loop, research, safety/approval, background task UX
+- **Operator decisions so far** — plan first for substantial work, diff before risky edits, explicit modes over hidden behavior, visible task state in the terminal, background shell work tracked as first-class tasks
+- **Next product priorities** — LSP-backed diagnostics, MCP-style extensibility, deeper git workflow support, and better `/compact` UX
 
 ---
 
@@ -60,6 +72,11 @@ codemitra
 ```
 codemitra> hi
 codemitra> create a FastAPI project called myapi with a src/ folder and install fastapi uvicorn
+codemitra> /run --background python -m http.server
+codemitra> /tasks
+codemitra> search the web for FastAPI background tasks
+codemitra> /permissions
+codemitra> /hibernate
 codemitra> exit
 ```
 
@@ -80,6 +97,7 @@ local-codex/
 │       ├── shell.py       # Command execution + whitelist + streaming
 │       ├── reader.py      # 5 read-only tools for codebase understanding
 │       ├── planner.py     # Step-by-step plan + per-step routing
+│       ├── web.py         # Web search and page-reading helper
 │       └── response.py    # ToolResult, AgentResponse, Rich renderer
 ├── misc/
 │   └── ascii.py         # ASCII art generator for the banner
@@ -93,6 +111,13 @@ local-codex/
 
 Full docs live in [`docs/`](docs/Home.md).
 
+Key product-direction docs:
+
+- [`docs/Product Blueprint.md`](docs/Product%20Blueprint.md) - feature baseline and target UX
+- [`docs/Roadmap.md`](docs/Roadmap.md) - implementation phases
+- [`docs/Testing Strategy.md`](docs/Testing%20Strategy.md) - regression layers, workflows, and transcript coverage
+- [`docs/Vision.md`](docs/Vision.md) - why CodeMitra exists and what gap it closes
+
 ---
 
 ## Roadmap
@@ -104,12 +129,15 @@ See [`docs/Roadmap.md`](docs/Roadmap.md) for the full phase-by-phase build plan.
 | 1–4 | Foundation, chat, filesystem agent, routing | ✅ Done |
 | 5 | Code reader agent | ✅ Done |
 | 6 | Shell agent | ✅ Done |
-| 7 | Planner agent + brainstorm loop | ✅ Done |
+| 7 | Planner agent | ✅ Done |
 | 8 | Memory vault | ✅ Done |
-| 9 | Diff preview before writes | 🔲 Next |
-| 10 | Test loop (`/fix` + pytest auto-retry) | 🔲 Planned |
-| 11 | `/explain` and `/fix` slash commands | 🔲 Planned |
-| 12 | Project auto-detect on startup | 🔲 Planned |
+| 9 | Brainstorm loop | ✅ Done |
+| 10 | Trust layer: diff preview + approvals | ✅ Done |
+| 11 | Repair loop + operator commands | ✅ Done |
+| 12 | Session UX | ✅ Mostly done |
+| 13 | Project auto-detect + code intelligence | ✅ Started |
+| 14 | Extensibility + policy controls | ✅ Started |
+| 15 | Git-aware workflows | 🔲 Planned |
 
 ---
 

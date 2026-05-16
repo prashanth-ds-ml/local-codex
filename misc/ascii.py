@@ -1,10 +1,39 @@
 from __future__ import annotations
 
+from textwrap import dedent
 from typing import Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 import numpy as np
 from rich.text import Text
+
+
+_CODEMITRA_BANNER = dedent(
+    r"""
+     ______                 __          __       __ __   __
+    /      \               |  \        |  \     /  \  \ |  \
+   |  ▓▓▓▓▓▓\ ______   ____| ▓▓ ______ | ▓▓\   /  ▓▓\▓▓_| ▓▓_    ______   ______
+   | ▓▓   \▓▓/      \ /      ▓▓/      \| ▓▓▓\ /  ▓▓▓  \   ▓▓ \  /      \ |      \
+   | ▓▓     |  ▓▓▓▓▓▓\  ▓▓▓▓▓▓▓  ▓▓▓▓▓▓\ ▓▓▓▓\  ▓▓▓▓ ▓▓\▓▓▓▓▓▓ |  ▓▓▓▓▓▓\ \▓▓▓▓▓▓\
+   | ▓▓   __| ▓▓  | ▓▓ ▓▓  | ▓▓ ▓▓    ▓▓ ▓▓\▓▓ ▓▓ ▓▓ ▓▓ | ▓▓ __| ▓▓   \▓▓/      ▓▓
+   | ▓▓__/  \ ▓▓__/ ▓▓ ▓▓__| ▓▓ ▓▓▓▓▓▓▓▓ ▓▓ \▓▓▓| ▓▓ ▓▓ | ▓▓|  \ ▓▓     |  ▓▓▓▓▓▓▓
+    \▓▓    ▓▓\▓▓    ▓▓\▓▓    ▓▓\▓▓     \ ▓▓  \▓ | ▓▓ ▓▓  \▓▓  ▓▓ ▓▓      \▓▓    ▓▓
+     \▓▓▓▓▓▓  \▓▓▓▓▓▓  \▓▓▓▓▓▓▓ \▓▓▓▓▓▓▓\▓▓      \▓▓\▓▓   \▓▓▓▓ \▓▓       \▓▓▓▓▓▓▓
+    """
+).strip("\n")
+
+_BLOCK_FONT_7X7: dict[str, list[str]] = {
+	"A": ["0011100", "0100010", "1000001", "1111111", "1000001", "1000001", "1000001"],
+	"C": ["0011111", "0100000", "1000000", "1000000", "1000000", "0100000", "0011111"],
+	"D": ["1111100", "1000010", "1000001", "1000001", "1000001", "1000010", "1111100"],
+	"E": ["1111111", "1000000", "1000000", "1111100", "1000000", "1000000", "1111111"],
+	"I": ["1111111", "0001000", "0001000", "0001000", "0001000", "0001000", "1111111"],
+	"M": ["1000001", "1100011", "1010101", "1001001", "1000001", "1000001", "1000001"],
+	"O": ["0011100", "0100010", "1000001", "1000001", "1000001", "0100010", "0011100"],
+	"R": ["1111100", "1000010", "1000010", "1111100", "1001000", "1000100", "1000010"],
+	"T": ["1111111", "0001000", "0001000", "0001000", "0001000", "0001000", "0001000"],
+	" ": ["0000", "0000", "0000", "0000", "0000", "0000", "0000"],
+}
 
 
 def generate_ascii_art(image_path: str, size: Tuple[int, int] = (40, 40), chars: Sequence[str] | None = None) -> str:
@@ -32,6 +61,11 @@ def generate_ascii_art(image_path: str, size: Tuple[int, int] = (40, 40), chars:
 		lines.append("".join(line_chars))
 
 	return "\n".join(lines)
+
+
+def generate_codemitra_banner_art() -> Text:
+	"""Return the fixed CodeMitra startup banner supplied for the CLI."""
+	return Text(_CODEMITRA_BANNER, style="bold #87ceeb", no_wrap=True)
 
 
 def generate_color_block_art(
@@ -170,91 +204,87 @@ def generate_halfblock_art(
 def generate_title_art(
 	text: str = "CodeMitra",
 	cols: int = 96,
-	rows: int = 7,
+	rows: int = 9,
 	font_path: str = "C:/Windows/Fonts/consolab.ttf",
 	font_size: int = 80,
 ) -> Text:
-	"""Render `text` as large colored half-block terminal art.
+	"""Render `text` as a crisp block-wordmark with gradient and subtle shadow."""
+	lines = [line.strip().upper() for line in text.splitlines() if line.strip()] or [text.upper()]
 
-	Draws the string at high resolution with a horizontal gradient
-	(cyan → electric blue → violet) then downscales to `cols × rows` cells.
-	Falls back to PIL's built-in font if the specified font is not found.
-	"""
-	pw, ph = cols, rows * 2   # pixel dimensions
+	def build_bitmap_line(line: str) -> np.ndarray:
+		glyphs = [_BLOCK_FONT_7X7.get(ch, _BLOCK_FONT_7X7[" "]) for ch in line]
+		row_bits: list[list[int]] = []
+		for row_idx in range(7):
+			parts: list[str] = []
+			for glyph_idx, glyph in enumerate(glyphs):
+				parts.append(glyph[row_idx])
+				if glyph_idx < len(glyphs) - 1:
+					parts.append("0")
+			row_bits.append([1 if ch == "1" else 0 for ch in "".join(parts)])
+		return np.array(row_bits, dtype=np.uint8)
 
-	# Draw at 4× then downscale for smooth anti-aliased edges
-	scale = 4
-	cw, ch = pw * scale, ph * scale
+	bitmap_lines = [build_bitmap_line(line) for line in lines]
+	if not bitmap_lines:
+		bitmap_lines = [np.zeros((1, 1), dtype=np.uint8)]
 
-	canvas = Image.new("RGB", (cw, ch), (0, 0, 0))
-	d = ImageDraw.Draw(canvas)
+	line_height = bitmap_lines[0].shape[0]
+	line_gap = 1 if len(bitmap_lines) > 1 else 0
+	source_height = line_height * len(bitmap_lines) + line_gap * (len(bitmap_lines) - 1)
+	source_width = max(line.shape[1] for line in bitmap_lines)
 
-	# Load font
-	try:
-		font = ImageFont.truetype(font_path, int(font_size * scale * ph / 100))
-	except Exception:
-		try:
-			font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", int(font_size * scale * ph / 100))
-		except Exception:
-			font = ImageFont.load_default()
+	source = np.zeros((source_height, source_width), dtype=np.uint8)
+	cursor_y = 0
+	for line in bitmap_lines:
+		offset_x = max((source_width - line.shape[1]) // 2, 0)
+		source[cursor_y:cursor_y + line.shape[0], offset_x:offset_x + line.shape[1]] = line
+		cursor_y += line.shape[0] + line_gap
 
-	# Measure and center the text
-	bbox = d.textbbox((0, 0), text, font=font)
-	tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-	tx = (cw - tw) // 2 - bbox[0]
-	ty = (ch - th) // 2 - bbox[1]
+	scale = min(cols / max(source_width, 1), rows / max(source_height, 1), 2.0)
+	target_width = max(1, int(round(source_width * scale)))
+	target_height = max(1, int(round(source_height * scale)))
+	if (target_width, target_height) != (source_width, source_height):
+		mask = Image.fromarray(source * 255, mode="L").resize((target_width, target_height), Image.NEAREST)
+		source = (np.array(mask, dtype=np.uint8) >= 127).astype(np.uint8)
 
-	# Draw white text first, then apply gradient mask
-	d.text((tx, ty), text, fill=(255, 255, 255), font=font)
+	alpha = np.zeros((rows, cols), dtype=np.uint8)
+	pad_x = max((cols - source.shape[1]) // 2, 0)
+	pad_y = max((rows - source.shape[0]) // 2, 0)
+	alpha[pad_y:pad_y + source.shape[0], pad_x:pad_x + source.shape[1]] = source * 255
 
-	canvas_arr = np.array(canvas, dtype=np.float32)
-
-	# Build horizontal gradient: mint (160,255,180) → light green (100,245,130) → spring (180,255,160)
-	gradient = np.zeros((ch, cw, 3), dtype=np.float32)
-	for x in range(cw):
-		t = x / max(cw - 1, 1)
-		if t < 0.5:
-			u = t * 2
-			# mint white → pure light green
-			r = 190 * (1-u) + 80  * u
-			g = 255 * (1-u) + 240 * u
-			b = 195 * (1-u) + 110 * u
-		else:
-			u = (t - 0.5) * 2
-			# light green → spring green
-			r = 80  * (1-u) + 170 * u
-			g = 240 * (1-u) + 255 * u
-			b = 110 * (1-u) + 140 * u
-		gradient[:, x] = [r, g, b]
-
-	# Apply gradient to the white text mask
-	alpha = canvas_arr[:, :, 0:1] / 255.0   # white text → luminance mask
-	colored = (gradient * alpha).astype(np.uint8)
-	result_img = Image.fromarray(colored, "RGB")
-
-	# Downscale
-	result_img = result_img.resize((pw, ph), Image.LANCZOS)
-	arr = np.array(result_img, dtype=np.int32)
+	shadow = np.zeros_like(alpha)
+	shadow_dx = 1
+	shadow_dy = 1
+	if rows > shadow_dy and cols > shadow_dx:
+		shadow[shadow_dy:, shadow_dx:] = alpha[:-shadow_dy, :-shadow_dx]
+		shadow = np.where(alpha > 0, 0, shadow)
 
 	out = Text(no_wrap=True)
+
+	def gradient_rgb(col: int) -> tuple[int, int, int]:
+		t = col / max(cols - 1, 1)
+		if t < 0.5:
+			u = t * 2
+			r = int(255 * (1 - u) + 255 * u)
+			g = int(214 * (1 - u) + 124 * u)
+			b = int(102 * (1 - u) + 67 * u)
+		else:
+			u = (t - 0.5) * 2
+			r = int(255 * (1 - u) + 196 * u)
+			g = int(124 * (1 - u) + 90 * u)
+			b = int(67 * (1 - u) + 255 * u)
+		return r, g, b
+
 	for row in range(rows):
 		if row > 0:
 			out.append("\n")
-		ty_ = row * 2
-		by_ = ty_ + 1
-		for col in range(pw):
-			tr, tg, tb = int(arr[ty_, col, 0]), int(arr[ty_, col, 1]), int(arr[ty_, col, 2])
-			br, bg_, bb = int(arr[by_, col, 0]), int(arr[by_, col, 1]), int(arr[by_, col, 2])
-			t_bg = tr + tg + tb < 20
-			b_bg = br + bg_ + bb < 20
-			if t_bg and b_bg:
-				out.append(" ")
-			elif t_bg:
-				out.append("▄", style=f"rgb({br},{bg_},{bb})")
-			elif b_bg:
-				out.append("▀", style=f"rgb({tr},{tg},{tb})")
+		for col in range(cols):
+			if alpha[row, col] >= 127:
+				r, g, b = gradient_rgb(col)
+				out.append("█", style=f"bold rgb({r},{g},{b})")
+			elif shadow[row, col] >= 127:
+				out.append("▓", style="rgb(42,18,62)")
 			else:
-				out.append("▀", style=f"rgb({tr},{tg},{tb}) on rgb({br},{bg_},{bb})")
+				out.append(" ")
 	return out
 
 

@@ -11,6 +11,7 @@ to browse, search, and link between sessions.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import textwrap
 from datetime import datetime
@@ -22,6 +23,9 @@ _DIR = ".codemitra"
 _ACTIVITY  = "activity.md"
 _CONTEXT   = "context.md"
 _PLAN      = "plan.md"
+_BRAINSTORM = "brainstorm.md"
+_LAST_CHANGE = "last_change.json"
+_SESSION = "session.json"
 
 
 def _dir(workspace: str) -> pathlib.Path:
@@ -178,6 +182,47 @@ def load_plan(workspace: str) -> str | None:
     return None
 
 
+def load_brainstorm(workspace: str) -> str | None:
+    """Return brainstorm.md contents, or None."""
+    path = _dir(workspace) / _BRAINSTORM
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return None
+
+
+def load_recent_activity(workspace: str, limit: int = 5) -> list[dict[str, str]]:
+    """Return the most recent conversation entries from activity.md."""
+    path = _dir(workspace) / _ACTIVITY
+    if not path.exists():
+        return []
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    entries: list[dict[str, str]] = []
+    current_date = ""
+    current: dict[str, str] | None = None
+
+    for line in lines:
+        if line.startswith("## "):
+            current_date = line[3:].strip()
+            continue
+        if line.startswith("### "):
+            if current:
+                entries.append(current)
+            current = {"date": current_date, "time": line[4:].strip(), "user": "", "assistant": ""}
+            continue
+        if current is None:
+            continue
+        if line.startswith("**You:** "):
+            current["user"] = line[len("**You:** "):].strip()
+        elif line.startswith("**CodeMitra:** "):
+            current["assistant"] = line[len("**CodeMitra:** "):].strip()
+
+    if current:
+        entries.append(current)
+
+    return entries[-limit:]
+
+
 def write_plan(workspace: str, goal: str, steps: list[str]) -> pathlib.Path:
     """Write (or overwrite) plan.md with a new goal and step list."""
     path = _dir(workspace) / _PLAN
@@ -194,11 +239,140 @@ def mark_step_done(workspace: str, step_index: int) -> None:
     if not path.exists():
         return
     lines = path.read_text(encoding="utf-8").splitlines()
-    unchecked = [i for i, l in enumerate(lines) if l.startswith("- [ ]")]
-    if step_index < len(unchecked):
-        i = unchecked[step_index]
+    step_lines = [i for i, l in enumerate(lines) if l.startswith("- [ ]") or l.startswith("- [x]")]
+    if 0 <= step_index < len(step_lines):
+        i = step_lines[step_index]
         lines[i] = lines[i].replace("- [ ]", "- [x]", 1)
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def record_last_change_set(workspace: str, change_set: dict) -> None:
+    """Persist the latest undoable change set for this workspace."""
+    path = _dir(workspace) / _LAST_CHANGE
+    payload = {
+        "recorded_at": datetime.now().isoformat(timespec="seconds"),
+        **change_set,
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def append_brainstorm_entry(workspace: str, prompt: str, response: str) -> pathlib.Path:
+    """Append one brainstorm exchange to brainstorm.md."""
+    path = _dir(workspace) / _BRAINSTORM
+    now = datetime.now()
+    stamp = now.strftime("%Y-%m-%d %H:%M")
+    if not path.exists():
+        header = textwrap.dedent("""\
+            ---
+            title: Brainstorm Notes
+            tags: [codemitra, brainstorm, notes]
+            ---
+
+            # Brainstorm Notes
+
+            > Saved idea exploration and planning notes from CodeMitra.
+        """)
+        path.write_text(header, encoding="utf-8")
+
+    entry = (
+        f"\n\n## {stamp}\n\n"
+        f"**Prompt:** {prompt.strip()}\n\n"
+        f"**CodeMitra:**\n\n{response.strip()}\n"
+    )
+    existing = path.read_text(encoding="utf-8")
+    path.write_text(existing + entry, encoding="utf-8")
+    return path
+
+
+def load_last_change_set(workspace: str) -> dict | None:
+    """Load the latest persisted change set, if any."""
+    path = _dir(workspace) / _LAST_CHANGE
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def clear_last_change_set(workspace: str) -> None:
+    """Remove the persisted change set after a successful undo."""
+    path = _dir(workspace) / _LAST_CHANGE
+    if path.exists():
+        path.unlink()
+
+
+def load_session_metadata(workspace: str) -> dict | None:
+    """Load persisted session metadata for this workspace."""
+    path = _dir(workspace) / _SESSION
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def save_session_metadata(workspace: str, metadata: dict) -> pathlib.Path:
+    """Persist session metadata for this workspace."""
+    path = _dir(workspace) / _SESSION
+    payload = {
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        **metadata,
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def record_hibernation(workspace: str, summary: str, *, reason: str = "low-memory recovery") -> None:
+    """Persist a lightweight recovery checkpoint into workspace memory files."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    append_activity(workspace, f"/hibernate ({reason})", summary)
+    update_context(workspace, f"Hibernated at {now}: {reason}")
+
+    plan_path = _dir(workspace) / _PLAN
+    if plan_path.exists():
+        text = plan_path.read_text(encoding="utf-8")
+        updated = _replace_field(text, "updated", now)
+        plan_path.write_text(updated, encoding="utf-8")
+
+
+def ensure_session_metadata(workspace: str, *, default_name: str | None = None) -> dict:
+    """Ensure a session metadata file exists and return its content."""
+    existing = load_session_metadata(workspace)
+    if existing:
+        return existing
+
+    root = pathlib.Path(workspace).resolve()
+    metadata = {
+        "name": default_name or root.name,
+        "workspace": str(root),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    save_session_metadata(workspace, metadata)
+    return load_session_metadata(workspace) or metadata
+
+
+def is_shell_command_trusted(workspace: str, cwd: str, command_name: str) -> bool:
+    """Return True when a shell command is trusted for a specific directory."""
+    metadata = ensure_session_metadata(workspace)
+    trusted = metadata.get("shell_trust", {})
+    commands = trusted.get(str(pathlib.Path(cwd).resolve()), [])
+    return command_name in commands
+
+
+def trust_shell_command(workspace: str, cwd: str, command_name: str) -> dict:
+    """Persist trust for a shell command within a specific directory."""
+    metadata = ensure_session_metadata(workspace)
+    trusted = dict(metadata.get("shell_trust", {}))
+    scope = str(pathlib.Path(cwd).resolve())
+    commands = list(trusted.get(scope, []))
+    if command_name not in commands:
+        commands.append(command_name)
+    trusted[scope] = sorted(commands)
+    metadata["shell_trust"] = trusted
+    save_session_metadata(workspace, metadata)
+    return load_session_metadata(workspace) or metadata
 
 
 # ── Init ──────────────────────────────────────────────────────────────────────
@@ -225,6 +399,7 @@ _OBSIDIAN_README = textwrap.dedent("""\
     | `activity.md` | Timestamped log of every conversation turn |
     | `context.md`  | Running project state — injected into every session |
     | `plan.md`     | Active task plan with checkboxes |
+    | `brainstorm.md` | Saved brainstorming and ideation notes |
 
     Open this folder in Obsidian for graph view, search, and daily-note navigation.
 """)
@@ -272,6 +447,23 @@ def init_memory(workspace: str) -> list[str]:
         )
         plan_path.write_text(content, encoding="utf-8")
         created.append(str(plan_path.relative_to(pathlib.Path(workspace).resolve())))
+
+    brainstorm_path = d / _BRAINSTORM
+    if not brainstorm_path.exists():
+        brainstorm_path.write_text(
+            textwrap.dedent("""\
+                ---
+                title: Brainstorm Notes
+                tags: [codemitra, brainstorm, notes]
+                ---
+
+                # Brainstorm Notes
+
+                > Use `/brainstorm <topic>` to save idea exploration here.
+            """),
+            encoding="utf-8",
+        )
+        created.append(str(brainstorm_path.relative_to(pathlib.Path(workspace).resolve())))
 
     # README.md — Obsidian vault description
     readme_path = d / "README.md"

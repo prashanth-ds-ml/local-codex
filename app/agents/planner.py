@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
@@ -50,7 +51,7 @@ class Plan:
 
     @property
     def is_done(self) -> bool:
-        return all(s.done for s in self.steps)
+        return bool(self.steps) and all(s.done for s in self.steps)
 
 
 # ─── Parse plan.md into a Plan object ────────────────────────────────────────
@@ -117,8 +118,11 @@ def create_plan(llm, goal: str, workspace: str, context: str = "") -> Plan:
     if not steps:
         # Fallback — treat each non-empty line as a step
         steps = [l.strip() for l in raw.splitlines() if l.strip()]
+    if not steps:
+        steps = [f"Clarify or restate the goal: {goal}"]
 
     memory.write_plan(workspace, goal, steps)
+    _reset_plan_execution_state(workspace, goal)
     return Plan(goal=goal, steps=[Step(index=i, text=s) for i, s in enumerate(steps)])
 
 
@@ -151,6 +155,164 @@ def render(plan: Plan) -> Panel:
     border = "green" if plan.is_done else "yellow"
     title  = "[bold green]Plan complete ✓[/bold green]" if plan.is_done else "[bold yellow]Active Plan[/bold yellow]"
     return Panel(content, title=title, border_style=border)
+
+
+def render_flow(plan: Plan, current_step: Step | None = None, blocked: int = 0) -> Panel:
+    """Render a compact task-flow panel for live execution updates."""
+    next_step = current_step.text if current_step else (plan.pending[0].text if plan.pending else "None")
+    total = len(plan.steps)
+    done = len(plan.completed)
+    doing = 1 if current_step else 0
+    planned = max(total - done - doing, 0)
+
+    stats = Table.grid(expand=True)
+    stats.add_column(justify="center")
+    stats.add_column(justify="center")
+    stats.add_column(justify="center")
+    stats.add_column(justify="center")
+    stats.add_row(
+        f"[cyan]Plan[/cyan]\n[bold]{planned}[/bold]",
+        f"[yellow]Doing[/yellow]\n[bold]{doing}[/bold]",
+        f"[green]Done[/green]\n[bold]{done}[/bold]",
+        f"[red]Blocked[/red]\n[bold]{blocked}[/bold]",
+    )
+
+    from rich.console import Group
+    content = Group(
+        stats,
+        Text(""),
+        Text.from_markup(f"[dim]Current:[/dim] {next_step}"),
+    )
+    return Panel(content, title="[bold cyan]Task Flow[/bold cyan]", border_style="cyan")
+
+
+def _reset_plan_execution_state(workspace: str, goal: str) -> None:
+    """Clear approval/progress metadata when a new plan replaces the old one."""
+    metadata = memory.ensure_session_metadata(workspace)
+    updated = {
+        **metadata,
+        "plan_execution": {
+            "goal": goal,
+            "approved": False,
+            "status": "draft",
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    }
+    updated.pop("active_plan_step", None)
+    memory.save_session_metadata(workspace, updated)
+
+
+def approve_plan(workspace: str) -> str:
+    """Mark the current saved plan as approved for execution."""
+    plan = _parse_plan(workspace)
+    if plan is None:
+        return "No active plan. Use `/plan <goal>` to create one."
+    metadata = memory.ensure_session_metadata(workspace)
+    memory.save_session_metadata(
+        workspace,
+        {
+            **metadata,
+            "plan_execution": {
+                **dict(metadata.get("plan_execution") or {}),
+                "goal": plan.goal,
+                "approved": True,
+                "status": "approved",
+                "approved_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        },
+    )
+    return f"Approved the active plan: {plan.goal}"
+
+
+def pause_plan(workspace: str) -> str:
+    """Mark active plan execution as paused without changing plan checkboxes."""
+    plan = _parse_plan(workspace)
+    if plan is None:
+        return "No active plan. Use `/plan <goal>` to create one."
+    metadata = memory.ensure_session_metadata(workspace)
+    active = dict(metadata.get("active_plan_step") or {})
+    if active:
+        active.update(
+            {
+                "status": "paused",
+                "paused_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+    memory.save_session_metadata(
+        workspace,
+        {
+            **metadata,
+            "plan_execution": {
+                **dict(metadata.get("plan_execution") or {}),
+                "goal": plan.goal,
+                "status": "paused",
+                "paused_at": datetime.now().isoformat(timespec="seconds"),
+            },
+            **({"active_plan_step": active} if active else {}),
+        },
+    )
+    return "Paused the active plan. Use `/plan next` to continue one step at a time."
+
+
+def is_plan_approved(workspace: str) -> bool:
+    """Return whether the current plan has been explicitly approved."""
+    plan = _parse_plan(workspace)
+    if plan is None:
+        return False
+    metadata = memory.ensure_session_metadata(workspace)
+    execution = metadata.get("plan_execution") or {}
+    return bool(execution.get("approved")) and execution.get("goal") == plan.goal
+
+
+def _set_active_step(workspace: str, plan: Plan, step: Step) -> None:
+    """Persist the currently executing plan step for resume/recovery UX."""
+    metadata = memory.ensure_session_metadata(workspace)
+    memory.save_session_metadata(
+        workspace,
+        {
+            **metadata,
+            "plan_execution": {
+                **dict(metadata.get("plan_execution") or {}),
+                "goal": plan.goal,
+                "approved": bool((metadata.get("plan_execution") or {}).get("approved")),
+                "status": "running",
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            },
+            "active_plan_step": {
+                "goal": plan.goal,
+                "index": step.index,
+                "text": step.text,
+                "status": "running",
+                "started_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        },
+    )
+
+
+def _finish_active_step(workspace: str, step: Step, status: str) -> None:
+    """Update the latest active-step checkpoint after a plan step finishes or blocks."""
+    metadata = memory.ensure_session_metadata(workspace)
+    active = dict(metadata.get("active_plan_step") or {})
+    if active.get("index") != step.index:
+        return
+    active.update(
+        {
+            "status": status,
+            "completed_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    memory.save_session_metadata(
+        workspace,
+        {
+            **metadata,
+            "plan_execution": {
+                **dict(metadata.get("plan_execution") or {}),
+                "status": status,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            },
+            "active_plan_step": active,
+        },
+    )
 
 
 # ─── Step router ─────────────────────────────────────────────────────────────
@@ -230,6 +392,8 @@ def run_plan(
     plan = _parse_plan(workspace)
     if plan is None:
         return "No active plan. Use /plan <goal> to create one."
+    if not plan.steps:
+        return "The active plan has no actionable steps yet. Regenerate it with /plan <goal>."
 
     if plan.is_done:
         return "All steps are already completed."
@@ -242,6 +406,7 @@ def run_plan(
             break
 
         if console:
+            console.print(render_flow(plan, current_step=step))
             console.print(
                 Panel(
                     f"[bold]{step.text}[/bold]",
@@ -250,18 +415,24 @@ def run_plan(
                 )
             )
 
-        result = execute_step(
-            llm,
-            step,
-            workspace,
-            console=console,
-            codegen_llm=codegen_llm,
-            reader_llm=reader_llm,
-            shell_llm=shell_llm,
-            direct_llm=direct_llm,
-        )
+        _set_active_step(workspace, plan, step)
+        try:
+            result = execute_step(
+                llm,
+                step,
+                workspace,
+                console=console,
+                codegen_llm=codegen_llm,
+                reader_llm=reader_llm,
+                shell_llm=shell_llm,
+                direct_llm=direct_llm,
+            )
+        except (Exception, KeyboardInterrupt):
+            _finish_active_step(workspace, step, "interrupted")
+            raise
         summaries.append(f"Step {step.index + 1} ({step.text}): {result[:300]}")
         memory.mark_step_done(workspace, step.index)
+        _finish_active_step(workspace, step, "completed")
         steps_run += 1
 
         if console:
@@ -274,6 +445,24 @@ def run_plan(
 
     remaining = len(updated_plan.pending) if updated_plan else 0
     done_count = steps_run
+    metadata = memory.ensure_session_metadata(workspace)
+    execution = dict(metadata.get("plan_execution") or {})
+    if updated_plan:
+        execution.update(
+            {
+                "goal": updated_plan.goal,
+                "approved": bool(execution.get("approved")),
+                "status": "completed" if updated_plan.is_done else "approved",
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        memory.save_session_metadata(
+            workspace,
+            {
+                **metadata,
+                "plan_execution": execution,
+            },
+        )
 
     summary = (
         f"Executed {done_count} step(s). "

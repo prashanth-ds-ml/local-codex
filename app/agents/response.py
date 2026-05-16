@@ -19,11 +19,18 @@ class ToolResult:
 
     @property
     def ok(self) -> bool:
-        return self.output.startswith("✓")
+        output = (self.output or "").strip()
+        if not output:
+            return False
+        return not output.startswith("✗")
 
     @property
     def label(self) -> str:
         return _extract_label(self.tool, self.args)
+
+    @property
+    def action(self) -> str:
+        return _extract_action(self.tool)
 
 
 @dataclass
@@ -64,6 +71,25 @@ def _extract_label(tool: str, args: dict) -> str:
             return args.get("path", args.get("project_path", ""))
 
 
+def _extract_action(tool: str) -> str:
+    actions = {
+        "list_directory": "Search",
+        "read_file": "Read",
+        "create_file": "Edit",
+        "move_file": "Move",
+        "delete_file": "Delete",
+        "delete_folder": "Delete",
+        "create_folder": "Create",
+        "create_venv": "Setup",
+        "install_packages": "Install",
+        "run_command": "Run",
+        "git_status": "Status",
+        "git_diff": "Diff",
+        "git_commit": "Commit",
+    }
+    return actions.get(tool, tool.replace("_", " ").title())
+
+
 # ─── Panel title ──────────────────────────────────────────────────────────────
 
 def _panel_title(response: AgentResponse) -> str:
@@ -91,34 +117,31 @@ def render(response: AgentResponse) -> Panel:
     parts: list = []
 
     # ── Request ──
-    parts.append(
-        Text.from_markup(
-            f"[dim]>[/dim] [italic]{response.request}[/italic]"
-        )
-    )
+    parts.append(Text.from_markup("[dim]Request[/dim]"))
+    parts.append(Text(response.request, style="italic"))
     parts.append(Text(""))
 
     # ── Steps ──
     if response.steps:
-        parts.append(Rule(title="steps", style="dim cyan", align="left"))
+        parts.append(Rule(title="activity", style="dim cyan", align="left"))
         parts.append(Text(""))
 
         grid = Table.grid(padding=(0, 1))
         grid.add_column(width=3, no_wrap=True)   # icon
-        grid.add_column(width=20, style="dim")   # tool name
+        grid.add_column(width=12, style="bold")  # action
         grid.add_column()                        # label / detail
 
         for step in response.steps:
             if step.ok:
-                icon = Text("✓", style="bold green")
-                label = Text(step.label, style="cyan")
+                icon = Text("●", style="bold cyan")
+                label = Text(step.label, style="white")
             else:
-                icon = Text("✗", style="bold red")
+                icon = Text("●", style="bold red")
                 # On failure: first line of output only (no walls of text)
                 first_line = step.output.lstrip("✗").strip().splitlines()[0]
                 label = Text(first_line[:120], style="red")
 
-            grid.add_row(icon, step.tool, label)
+            grid.add_row(icon, step.action, label)
 
         parts.append(grid)
         parts.append(Text(""))

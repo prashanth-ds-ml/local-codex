@@ -21,12 +21,15 @@ def get_llm(
     *,
     base_url: str | None = None,
     api_key: str | None = None,
+    num_ctx: int | None = None,
 ) -> ChatOllama:
     """Return a ChatOllama instance for the given model name."""
     kwargs = {
         "model": model,
         "temperature": temperature,
     }
+    if num_ctx:
+        kwargs["num_ctx"] = num_ctx
     if base_url:
         kwargs["base_url"] = base_url
     client_kwargs = _make_client_kwargs(api_key)
@@ -40,9 +43,10 @@ def get_local_llm(
     temperature: float = 0.2,
     *,
     base_url: str | None = None,
+    num_ctx: int | None = None,
 ) -> ChatOllama:
     """Return a client for the local Ollama daemon."""
-    return get_llm(model, temperature, base_url=base_url or _LOCAL_BASE_URL)
+    return get_llm(model, temperature, base_url=base_url or _LOCAL_BASE_URL, num_ctx=num_ctx)
 
 
 def get_cloud_llm(
@@ -51,6 +55,7 @@ def get_cloud_llm(
     *,
     api_key: str | None = None,
     base_url: str | None = None,
+    num_ctx: int | None = None,
 ) -> ChatOllama:
     """Return a client for Ollama's hosted cloud API."""
     return get_llm(
@@ -58,6 +63,7 @@ def get_cloud_llm(
         temperature,
         base_url=base_url or _CLOUD_BASE_URL,
         api_key=api_key,
+        num_ctx=num_ctx,
     )
 
 

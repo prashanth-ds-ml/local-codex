@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "local-codex"
 version = "0.1.0"
@@ -7,6 +11,7 @@ dependencies = [
     "langchain-ollama",
     "langchain-core",
     "python-dotenv",
+    "tomli; python_version < '3.11'",
     "typer",
     "ollama",
     "Pillow",
@@ -17,4 +22,7 @@ dependencies = [
 codemitra = "app.main:cli"
 
 [tool.setuptools]
-packages = ["app", "misc"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["app*", "misc*"]

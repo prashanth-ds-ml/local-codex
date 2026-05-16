@@ -24,3 +24,9 @@ class TestSystemPrompt:
 
     def test_call_immediately_rule_present(self):
         assert "immediately" in SYSTEM_PROMPT
+
+    def test_simple_greetings_reply_directly(self):
+        assert 'simple greetings like "hi" or "hello"' in SYSTEM_PROMPT
+
+    def test_prompt_requires_natural_english_for_greetings(self):
+        assert "normal word order" in SYSTEM_PROMPT

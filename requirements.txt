@@ -25,6 +25,7 @@ pydantic==2.13.3
 pydantic_core==2.46.3
 Pygments==2.20.0
 python-dotenv==1.2.2
+tomli==2.4.1
 PyYAML==6.0.3
 requests==2.33.1
 requests-toolbelt==1.0.0

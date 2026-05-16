@@ -8,6 +8,8 @@ aliases: [Build Plan, Phases]
 
 CodeMitra is being built incrementally, one capability layer at a time. Each phase is self-contained and testable before the next begins.
 
+This doc is the **implementation sequence**. For product behavior targets, use [[Product Blueprint]]. For the Claude-specific benchmark and gaps, use [[Claude Code Reference]] and [[Claude Code Comparison]].
+
 ---
 
 ## Phase 1 — Project foundation ✅
@@ -115,27 +117,81 @@ Agent behaviour:
 
 ---
 
-## Phase 10 — Diff preview + test loop 🔲
+## Phase 10 — Trust layer: diff preview + approvals 🔲
 
-- [ ] Show diff/summary before bulk file writes (confirm Y/N)
-- [ ] `run pytest → read failures → generate fix → run again` loop (max 3 attempts)
-- [ ] `/fix <paste error>` slash command shortcut
-
----
-
-## Phase 11 — Slash command shortcuts 🔲
-
-- [ ] `/explain <file>` — explain what a file does
-- [ ] `/fix <error>` — paste traceback, get fix applied
-- [ ] `/review` — run reviewer agent on changed files
+- [x] Show diff/summary before bulk file writes (confirm Y/N)
+- [x] Add explicit permission modes (`read-only`, `plan`, `approve`, `auto`)
+- [x] Separate approvals for file edits and shell commands, with workspace scope still enforced
+- [x] Add undo / rewind for the last change set
 
 ---
 
-## Phase 12 — Project auto-detect 🔲
+## Phase 11 — Repair loop + operator commands 🔲
 
-- [ ] On startup, scan README + entry points + file tree
-- [ ] Inject as context so LLM knows the project without being told
+- [x] `/fix <command>` — run a bounded repair loop against a failing command
+- [x] `run pytest -> read failures -> generate fix -> run again` loop (max 3 attempts)
+- [x] `/diff` — inspect pending changes
+- [x] `/review` — run reviewer agent on changed files or the last CodeMitra change set
+- [x] `/explain <file>` — explain what a file does
+
+---
+
+## Phase 12 — Session UX 🔲
+
+- [x] Named sessions
+- [x] `/resume`, `/history`, `/rename`
+- [x] Better task / progress timeline in the terminal UI
+- [x] Clear model, usage, and current-task visibility
+- [x] Persistent prompt toolbar with mode, model, cwd, context load, and task state
+- [x] `/context` for live context-window usage
+- [x] `/permissions` for live policy visibility
+- [x] `/hibernate` for low-memory recovery after saving session state
+- [x] Prompt-in-editor with `Ctrl+G`
+- [x] Background shell tasks with `/run --background <cmd>` and `/tasks`
+- [x] Plan-step checkpoint in session metadata so `/resume` can show interrupted or completed plan execution state
+- [x] Explicit plan approval and controls with `/plan approve`, `/plan next`, `/plan run`, and `/plan pause`
+- [x] Compaction checkpoint in session metadata so `/resume` can show the last manual or automatic compact event
+- [ ] Improve `/compact` and automatic compaction controls and previews
+
+---
+
+## Phase 13 — Project auto-detect + code intelligence 🔲
+
+- [x] On startup, scan README + entry points + file tree
+- [x] Inject a concise project brief as startup context so the LLM knows the workspace without being told
 - [ ] Skip manual `/context` load for known project layouts
+- [x] Add a dedicated symbol lookup / references workflow
+- [ ] Add LSP-backed diagnostics when available
+
+---
+
+## Phase 14 — Extensibility + policy controls ✅ In progress
+
+- [x] Configurable allowed directories and tool policies
+- [x] Project-level instruction loading from configured workspace files
+- [x] Workspace CodeMitra skill discovery with `/skills` and `/skills show <name>`
+- [ ] MCP server support
+- [ ] Plugin or custom slash command extension points
+
+---
+
+## Phase 15 — Git-aware workflows 🔲
+
+- [x] Git diff-aware review flow
+- [x] Branch-aware `/status` summary with upstream and working-tree counts
+- [x] Commit-readiness summary in `/status`
+- [ ] Commit message / commit-content summaries
+- [ ] Stronger review-before-commit workflow
+- [ ] Optional IDE / editor handoff later
+
+---
+
+## Current next steps
+
+1. **Code intelligence + extensibility** — LSP-backed diagnostics and MCP hooks
+2. **Git workflow depth** — commit message summaries and stronger review-before-commit
+3. **Compaction polish** — add clearer `/compact` controls and previews on top of the saved checkpoint
+4. **Plan execution polish** — continue refining approval and resume edge cases as real sessions expose them
 
 ---
 
@@ -152,6 +208,18 @@ Agent behaviour:
 | 7 | Planner agent | ✅ Done |
 | 8 | Memory vault | ✅ Done |
 | 9 | Brainstorm loop | ✅ Done |
-| 10 | Diff preview + test loop | 🔲 Next |
-| 11 | Slash command shortcuts | 🔲 Planned |
-| 12 | Project auto-detect | 🔲 Planned |
+| 10 | Trust layer: diff preview + approvals | ✅ Done |
+| 11 | Repair loop + operator commands | ✅ Done |
+| 12 | Session UX | ✅ Mostly done |
+| 13 | Project auto-detect + code intelligence | ✅ In progress |
+| 14 | Extensibility + policy controls | ✅ In progress |
+| 15 | Git-aware workflows | ✅ In progress |
+
+---
+
+## See also
+
+- [[Vision]]
+- [[Product Blueprint]]
+- [[Claude Code Reference]]
+- [[Claude Code Comparison]]

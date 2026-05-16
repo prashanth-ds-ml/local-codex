@@ -50,6 +50,21 @@ class TestGetFileTree:
         result = reader_agent.get_file_tree.invoke({"path": "C:\\Windows"})
         assert "Permission denied" in result or "✗" in result
 
+    def test_broken_entry_does_not_crash_tree(self, tmp_path, monkeypatch):
+        target = tmp_path / "ghost.txt"
+        target.write_text("x")
+        original_stat = pathlib.Path.stat
+
+        def flaky_stat(path_obj, *args, **kwargs):
+            if path_obj == target:
+                raise FileNotFoundError("broken junction target")
+            return original_stat(path_obj, *args, **kwargs)
+
+        monkeypatch.setattr(pathlib.Path, "stat", flaky_stat)
+        result = reader_agent.get_file_tree.invoke({"path": str(tmp_path)})
+        assert "ghost.txt" in result
+        assert "unavailable" in result
+
 
 # ── read_file ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +97,15 @@ class TestReadFile:
     def test_outside_workspace_denied(self, tmp_path):
         result = reader_agent.read_file.invoke({"path": "/etc/passwd"})
         assert "Permission denied" in result or "✗" in result
+
+    def test_allowed_root_can_be_read(self, tmp_path):
+        extra = tmp_path.parent / "shared-reader"
+        extra.mkdir(exist_ok=True)
+        target = extra / "notes.txt"
+        target.write_text("hello", encoding="utf-8")
+        reader_agent.configure(workspace=str(tmp_path), allowed_roots=[str(extra)])
+        result = reader_agent.read_file.invoke({"path": str(target)})
+        assert "hello" in result
 
 
 # ── search_in_files ───────────────────────────────────────────────────────────

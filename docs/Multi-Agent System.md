@@ -32,12 +32,14 @@ flowchart TD
     Planner --> CodeReader
     Planner --> Shell
     Planner --> Reviewer
+    Conversation --> Web
 
     subgraph Execution["Execution Layer"]
         Filesystem["Filesystem Agent\n✅ Built\nFolders, files, venv, packages"]
         CodeReader["Code Reader Agent\n✅ Built\nReads and understands codebase"]
-        Shell["Shell Agent\n✅ Built\nRuns commands, tests, builds"]
-        Reviewer["Reviewer Agent\n🔲 Planned\nReviews code quality"]
+        Shell["Shell Agent\n✅ Built\nRuns commands, tests, builds, background tasks"]
+        Reviewer["Reviewer Agent\n✅ Built\nReviews git diff or change sets"]
+        Web["Web Agent\n✅ Built\nSearches and reads the web"]
     end
 ```
 
@@ -83,7 +85,7 @@ User answers
 Planner receives answers → generates specific, actionable steps
 ```
 
-This mirrors exactly how Claude Code works — ask before acting.
+This follows the same plan-first principle used by the best terminal coding assistants: ask before acting when the task is underspecified.
 
 ---
 
@@ -136,6 +138,8 @@ Responsibilities:
 - Identifies patterns, dependencies, entry points
 - Feeds context to the Planner and other agents
 
+---
+
 Tools (all read-only):
 - `read_file` — pageable file reader with line-number gutter
 - `list_directory` — directory listing
@@ -164,7 +168,7 @@ Tools:
 ---
 
 ### Reviewer Agent
-**Status:** 🔲 Planned
+**Status:** ✅ Built
 **Model:** `qwen2.5-coder:7b`
 
 Responsibilities:
@@ -172,6 +176,15 @@ Responsibilities:
 - Checks for correctness, style, security issues
 - Produces structured feedback (pass / warn / fail per file)
 - Requests changes from the Code Writer if issues are found
+
+### Web Agent
+**Status:** ✅ Built
+**Model:** `qwen2.5-coder:7b`
+
+Responsibilities:
+- Runs explicit web search and URL-reading workflows
+- Summarizes fetched sources for research-style requests
+- Surfaces deterministic failure summaries when fetch/search fails
 
 ---
 
@@ -200,7 +213,7 @@ Execution begins, phase by phase
 Each phase is confirmed with the user before proceeding
 ```
 
-This mirrors exactly how Claude Code works — it asks before acting on ambiguous requests.
+This follows the same product principle used by strong terminal coding assistants: ask before acting on ambiguous requests.
 
 ---
 
@@ -213,8 +226,7 @@ your-project/
 ├── .codemitra/
 │   ├── context.md        # What this project is, stack, entry points
 │   ├── plan.md           # The current implementation plan
-│   ├── session-log.jsonl # History of all agent actions
-│   └── decisions.md      # Why certain choices were made
+│   └── session.json      # Session name, trust state, hibernation metadata
 ├── docs/                 # Obsidian vault (if enabled)
 │   ├── Home.md
 │   ├── Architecture.md
@@ -223,9 +235,9 @@ your-project/
 ```
 
 When CodeMitra starts on a project:
-1. Checks for `.codemitra/context.md` — loads existing context
+1. Checks for `.codemitra/context.md` and `session.json` — loads existing context and session state
 2. If new project: runs Code Reader Agent to understand the codebase
-3. Writes a context file so the next session knows where things stand
+3. Writes context and plan/session artifacts so the next session knows where things stand
 
 This is what gives CodeMitra memory across sessions.
 
@@ -269,4 +281,15 @@ def run_code_writer_agent(spec: str, file_path: str) -> str:
     return code_writer.run(agent_llm, spec, file_path).summary
 ```
 
-Agents calling agents. Each layer handles its own scope.
+---
+
+Agents call other agents through clear boundaries. Each layer handles its own scope.
+
+---
+
+## See also
+
+- [[Architecture]]
+- [[Product Blueprint]]
+- [[Claude Code Reference]]
+- [[Claude Code Comparison]]

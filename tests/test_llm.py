@@ -17,10 +17,11 @@ class TestGetLocalLlm:
 
         monkeypatch.setattr(llm, "ChatOllama", fake_chat_ollama)
 
-        llm.get_local_llm("qwen3.5:latest", temperature=0.1)
+        llm.get_local_llm("qwen3.5:latest", temperature=0.1, num_ctx=32768)
 
         assert captured["model"] == "qwen3.5:latest"
         assert captured["temperature"] == 0.1
+        assert captured["num_ctx"] == 32768
         assert captured["base_url"] == "http://localhost:11434"
         assert "client_kwargs" not in captured
 
@@ -35,10 +36,11 @@ class TestGetCloudLlm:
 
         monkeypatch.setattr(llm, "ChatOllama", fake_chat_ollama)
 
-        llm.get_cloud_llm("kimi-k2.5:cloud", temperature=0.3, api_key="secret-key")
+        llm.get_cloud_llm("kimi-k2.5:cloud", temperature=0.3, api_key="secret-key", num_ctx=65536)
 
         assert captured["model"] == "kimi-k2.5:cloud"
         assert captured["temperature"] == 0.3
+        assert captured["num_ctx"] == 65536
         assert captured["base_url"] == "https://ollama.com"
         assert captured["client_kwargs"] == {
             "headers": {"Authorization": "Bearer secret-key"}

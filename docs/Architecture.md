@@ -8,7 +8,9 @@ aliases: [System Design, How it works]
 
 ## Overview
 
-CodeMitra uses a **single shared model, multi-agent** architecture. One LLM instance is bound with four routing tools (`setup_project`, `run_command`, `read_codebase`, `execute_plan`). Each routing tool hands off to a dedicated sub-agent that runs its own LLM tool loop. No real action (filesystem, shell, or file reading) happens outside a tool function.
+CodeMitra uses a **shared-model, multi-agent** architecture. The main chat model is bound with routing tools for filesystem work, shell execution, code reading, planning, and web access. Each routing tool hands off to a dedicated sub-agent or helper flow that runs its own logic. Review, explain, session, and code-intelligence commands also run through dedicated helpers instead of raw free-form chat. No real action (filesystem, shell, file reading, or web lookup) happens outside a tool or explicit command path.
+
+Use [[Multi-Agent System]] for the role split between agents, [[Product Blueprint]] for target product behavior, and [[Claude Code Reference]] / [[Claude Code Comparison]] for the benchmark context behind the next architectural steps.
 
 ---
 
@@ -21,7 +23,7 @@ flowchart TD
     subgraph MainLoop["Main Loop (main.py)"]
         direction TB
         ChatLLM["Shared LLM\n(model selected at startup)"]
-        UX["UX Layer\nsmart prompt · hint bar · tab completion\nMarkdown rendering · error logging\nthinking panel · token bar · auto-compact"]
+        UX["UX Layer\nsmart prompt · hint bar · tab completion\nbottom toolbar · Ctrl+G editor\nMarkdown rendering · error logging\nthinking panel · token bar · auto-compact"]
     end
 
     MainLoop -->|direct answer| Display([Rich panel / Markdown])
@@ -30,6 +32,7 @@ flowchart TD
     MainLoop -->|tool call: run_command| ShellAgent
     MainLoop -->|tool call: read_codebase| ReaderAgent
     MainLoop -->|tool call: execute_plan| PlannerAgent
+    MainLoop -->|tool call: browse_web| WebAgent
 
     subgraph FilesystemAgent["Filesystem Agent (agents/filesystem.py)"]
         direction TB
@@ -72,6 +75,15 @@ flowchart TD
         PlanCreate --> StepRouter --> StepExec
     end
 
+    subgraph WebAgent["Web Agent (agents/web.py)"]
+        direction TB
+        WebSearch["search_web()\nDuckDuckGo HTML search parser"]
+        WebFetch["fetch_url()\npage text extraction"]
+        WebRender["web summary render"]
+        WebSearch --> WebRender
+        WebFetch --> WebRender
+    end
+
     FilesystemAgent --> ResponseTemplate["Response template\n(agents/response.py)\ndynamic panel title"]
     ShellAgent --> ShellRender["Shell panel\n(agents/shell.py)"]
     ReaderAgent --> ReaderRender["Reader panel\n(magenta border)"]
@@ -92,14 +104,19 @@ flowchart TD
 
 - `codemitra init` — scaffolds `.codemitra/` memory vault (4 markdown files)
 - `codemitra chat` — starts the interactive chat loop
-- Picks model at startup (lists local Ollama models)
-- Binds four routing tools to the shared LLM: `setup_project`, `run_command`, `read_codebase`, `execute_plan`
-- Slash commands: `/init`, `/run <cmd>`, `/plan <goal>`, `/memory`, `/context`, `/reset`, `/compact`, `/help`
-- UX layer: smart prompt `[project] (model)>`, hint bar, tab completion via `WordCompleter`, turn separator `Rule`, Markdown/syntax highlighting in LLM responses, `_friendly_error()` with `.codemitra/errors.log`
+- Picks model at startup (lists local Ollama models, supports refresh and removal)
+- Binds five routing tools to the shared LLM: `setup_project`, `run_command`, `read_codebase`, `execute_plan`, `browse_web`
+- Slash commands: `/init`, `/run <cmd>`, `/plan <goal>`, `/memory`, `/context`, `/status`, `/permissions`, `/skills`, `/skills show <name>`, `/search <query>`, `/open-url <url>`, `/diff`, `/review`, `/fix`, `/resume`, `/history`, `/rename`, `/tasks`, `/compact`, `/hibernate`, `/reset`, `/help`
+- UX layer: smart prompt, hint bar, tab completion via `WordCompleter`, persistent bottom toolbar, `Ctrl+G` editor compose, turn separator `Rule`, Markdown/syntax highlighting in LLM responses, `_friendly_error()` with `.codemitra/errors.log`
+- Startup context: auto-detects a concise workspace brief from README, entrypoints, dependencies, tests, and top-level files/folders, then injects it into the initial system prompt
+- Skill context: discovers `skills/*/SKILL.md` and `.codemitra/skills/*/SKILL.md`, injects only the compact skill index, and reads full skill bodies on demand through the code reader
 - Streaming: `main_llm.stream()` with automatic fallback to `invoke()` when tool calls are detected
+- Inner-agent progress: blocking sub-agent `invoke()` and tool phases now show status spinners so web, reader, shell, and filesystem flows do not appear idle during summarization
 - Thinking panel: `<think>…</think>` blocks extracted and shown in a dim panel before the reply
 - Token bar: shows per-turn and session token totals with a fill gauge; `⚡ /compact` hint at 80% of threshold
 - Auto-compact: when session tokens exceed `auto_compact_threshold`, LLM summarises history into a fresh message list; also triggered by `/compact`
+- Low-memory recovery: `/hibernate` persists session memory, touches plan/session metadata, asks Ollama to unload the active model, runs garbage collection, and resets in-memory chat history
+- Background task UX: `/run --background` starts tracked shell work, `/tasks` inspects it, and the toolbar/status surfaces live background task count
 
 ### `app/llm.py` — Model layer
 
@@ -108,8 +125,8 @@ flowchart TD
 
 ### `app/prompts.py` — System prompt
 
-- Describes all four routing tools (`setup_project`, `run_command`, `read_codebase`, `execute_plan`) with explicit routing rules
-- Rules: file ops → `setup_project`; execution → `run_command`; list/inspect → `read_codebase`; plan next step → `execute_plan`; questions → direct answer; call tools immediately
+- Describes all five routing tools (`setup_project`, `run_command`, `read_codebase`, `execute_plan`, `browse_web`) with explicit routing rules
+- Rules: file ops → `setup_project`; execution → `run_command`; list/inspect → `read_codebase`; plan next step → `execute_plan`; web lookup or URL reading → `browse_web`; questions → direct answer; call tools immediately
 
 ### `app/agents/brainstorm.py` — Pre-plan clarification agent
 
@@ -146,6 +163,7 @@ Key components:
 - `ShellConfig` — workspace, allowed commands, default timeout, stream flag, confirm callback
 - `ShellResult` — command, cwd, exit code, output lines, timed_out, denied flags; `.ok`, `.output`, `.tail`, `.to_llm_summary()`
 - `execute(command, cwd, timeout, console)` — threaded stdout reader, streams live output, enforces timeout
+- `BackgroundTask` registry — tracks `bg-*` tasks, recent output, status, timestamps, and stop requests for `/run --background` and `/tasks`
 - `run_shell` — `@tool` for LangChain tool loop
 - `run_agent(llm, request, console)` → `str` — NL shell request loop
 - `make_routing_tool(llm, console)` — wraps as `run_command` tool
@@ -182,6 +200,13 @@ Key components:
 - `run_plan(llm, workspace, console, max_steps)` → `str` — executes the next pending step(s)
 - `make_routing_tool(llm, workspace, console)` — wraps as `execute_plan` tool
 
+### Dedicated helper agents
+
+- `app/agents/reviewer.py` — review flow used by `/review`
+- `app/agents/explainer.py` — file-level explanation flow used by `/explain`
+- `app/agents/codeintel.py` — definitions / references workflow used by `/symbols`
+- `app/agents/session.py` — session naming, resume, compact, and hibernation helpers
+
 
 
 - `ToolResult(tool, args, output, ok)` — one tool execution step
@@ -199,8 +224,16 @@ Files in `<workspace>/.codemitra/`:
 | `context.md` | Current project context (editable) |
 | `plan.md` | Numbered task plan with completion markers |
 | `README.md` | Vault index |
+| `session.json` | Session name, trust state, hibernation metadata, and related UX state |
 
 Key functions: `init_memory(workspace)`, `append_activity()`, `load_context()`, `update_context()`, `load_plan()`, `write_plan()`, `mark_step_done()`
+
+### `app/skills.py` — Workspace skill registry
+
+- Discovers skills from configured workspace directories
+- Parses `SKILL.md` frontmatter for `name` and `description`
+- Formats a compact startup prompt index without loading every skill body into context
+- Keeps skill files inside workspace scope
 
 ### `misc/ascii.py` — Banner art
 
@@ -251,7 +284,7 @@ sequenceDiagram
     PA-->>M: Plan(steps=[…]) written to plan.md
     M->>U: yellow plan panel shown
 
-    U->>M: "continue"
+    U->>M: "/plan next"
     M->>C: stream(messages)
     C-->>M: tool_call: execute_plan()
     M->>PA: planner.run_plan(llm, workspace)

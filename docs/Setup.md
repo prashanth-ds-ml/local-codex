@@ -70,8 +70,25 @@ You should see the banner with the ASCII avatar and taglines, then the `codemitr
 ```
 codemitra> hi
 codemitra> create a folder called test-project with a .venv and install requests
+codemitra> /status
+codemitra> /run --background python -m http.server
+codemitra> /tasks
+codemitra> /skills
 codemitra> exit
 ```
+
+---
+
+## Skills
+
+CodeMitra discovers reusable engineering playbooks from:
+
+```text
+skills/<name>/SKILL.md
+.codemitra/skills/<name>/SKILL.md
+```
+
+Use `/skills` to list the active pack and `/skills show <name>` to inspect one skill. Configure locations with `skill_dirs` in `codemitra.toml`.
 
 ---
 

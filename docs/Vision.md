@@ -55,20 +55,26 @@ The key idea: **use the right model for the right job**.
 
 ## The gap we are closing
 
-| Capability | Claude Code | Ollama alone | CodeMitra goal |
-|---|---|---|---|
-| Chat about code | ✅ | ✅ | ✅ |
-| Structured tool calling | ✅ | ⚠️ model-dependent | ✅ with right model |
-| Create files / scaffold | ✅ | ❌ | ✅ |
-| Read and understand existing code | ✅ | ❌ | 🔨 building |
-| Run shell commands and react | ✅ | ❌ | 🔨 building |
-| Multi-step planning | ✅ | ❌ | 🔨 building |
-| Ask clarifying questions | ✅ | ❌ | 🔨 building |
-| Memory across sessions | ✅ | ❌ | 🔨 building |
-| Works on any project | ✅ | ❌ | 🔨 building |
-| 100% offline | ❌ | ✅ | ✅ |
-| No API costs | ❌ | ✅ | ✅ |
-| Your data stays local | ❌ | ✅ | ✅ |
+CodeMitra is no longer at the "can it do anything?" stage. The core agent system now exists. The gap has shifted from capability creation to product behavior: trust, approvals, review, repair loops, session UX, and developer ergonomics.
+
+| Capability | Claude Code / Codex / Copilot | Ollama alone | CodeMitra now | CodeMitra next |
+|---|---|---|---|---|
+| Chat about code | ✅ | ✅ | ✅ | Keep |
+| Structured tool calling | ✅ | ⚠️ model-dependent | ✅ | Keep improving |
+| Create files / scaffold | ✅ | ❌ | ✅ | Add diff-first review |
+| Read and understand code | ✅ | ❌ | ✅ | Add better symbol precision |
+| Run shell commands and react | ✅ | ❌ | ✅ | Add richer plan/task coordination |
+| Background task UX | ✅ | ❌ | ✅ | Add persistence and tighter plan integration |
+| Multi-step planning | ✅ | ❌ | ✅ | Add plan approval and interrupted-plan resume |
+| Ask clarifying questions | ✅ | ❌ | ✅ | Keep |
+| Memory across sessions | ✅ | ❌ | ✅ | Improve compaction and resume polish |
+| Diff and review workflow | ✅ | ❌ | ✅ | Deepen review-before-commit flow |
+| Test-fix-retry loop | ✅ | ❌ | ✅ | Keep improving |
+| Permission modes | ✅ | ❌ | ✅ | Keep refining |
+| Extensibility / MCP | ✅ | ❌ | Skills baseline; no MCP yet | Add MCP / plugin hooks |
+| 100% offline | ❌ | ✅ | ✅ | Keep as core identity |
+| No API costs | ❌ | ✅ | ✅ | Keep as core identity |
+| Your data stays local | ❌ | ✅ | ✅ | Keep as core identity |
 
 ---
 
@@ -86,3 +92,19 @@ CodeMitra should be able to:
 8. Remember context across sessions so it picks up where it left off
 
 All of this, running entirely on your machine, with no external API calls.
+
+---
+
+## Product direction from here
+
+Now that the core agent layers exist, CodeMitra should evolve toward the behavior users expect from top-tier terminal coding assistants:
+
+1. plan visibly before acting
+2. ask before editing
+3. show diff before applying changes
+4. run tests automatically after edits
+5. support standard operator commands like `/diff`, `/fix`, `/review`, `/resume`, and `/compact`
+6. make permissions and current task state obvious
+7. make background work and plan progress explicit instead of hidden
+
+See [[Product Blueprint]] for the cross-product target UX, [[Claude Code Reference]] for the Claude-style architectural reference, and [[Claude Code Comparison]] for the current CodeMitra gap analysis.

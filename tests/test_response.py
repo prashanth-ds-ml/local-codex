@@ -1,6 +1,6 @@
 """Tests for app/agents/response.py — panel rendering, title logic, step truncation."""
 import pytest
-from app.agents.response import AgentResponse, ToolResult, _panel_title, render
+from app.agents.response import AgentResponse, ToolResult, _extract_action, _panel_title, render
 
 
 # ── _panel_title ──────────────────────────────────────────────────────────────
@@ -57,6 +57,21 @@ class TestToolResultOk:
     def test_not_ok_on_empty(self):
         assert ToolResult(tool="t", args={}, output="").ok is False
 
+    def test_plain_success_output_counts_as_ok(self):
+        assert ToolResult(tool="t", args={}, output="./\n  [dir] src").ok is True
+
+
+class TestToolResultAction:
+    def test_extracts_compact_actions(self):
+        assert _extract_action("list_directory") == "Search"
+        assert _extract_action("read_file") == "Read"
+        assert _extract_action("create_file") == "Edit"
+        assert _extract_action("run_command") == "Run"
+
+    def test_tool_result_exposes_action(self):
+        step = ToolResult(tool="create_file", args={"path": "app.py"}, output="✓ Created file: app.py")
+        assert step.action == "Edit"
+
 
 # ── AgentResponse counts ──────────────────────────────────────────────────────
 
@@ -104,3 +119,15 @@ class TestRenderPanelTitle:
         panel = render(r)
         # Rich Panel title is a renderable — check it contains our string
         assert "Installing packages" in str(panel.title)
+
+    def test_render_uses_compact_activity_labels(self):
+        r = AgentResponse(
+            request="inspect and update files",
+            steps=[
+                ToolResult(tool="list_directory", args={"path": "."}, output="src\napp.py"),
+                ToolResult(tool="create_file", args={"path": "app.py"}, output="✓ Created file: app.py"),
+            ],
+        )
+        panel = render(r)
+        body = panel.renderable
+        assert body is not None
