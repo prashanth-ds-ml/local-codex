@@ -1350,7 +1350,7 @@ class TestApprovalMenus:
         shell_agent.configure(workspace=str(tmp_path), stream_to_console=False, confirm_fn=None)
         monkeypatch.setattr(main_mod, "_choose_approval_option", lambda *args, **kwargs: "trust")
 
-        assert _confirm_shell("pytest tests\\test_main_ux.py", str(tmp_path)) is True
+        assert _confirm_shell("pytest tests\\test_main_ux.py", str(tmp_path)) == "pytest tests\\test_main_ux.py"
         assert memory.is_shell_command_trusted(str(tmp_path), str(tmp_path), "pytest") is True
 
     def test_confirm_shell_skips_menu_for_trusted_command(self, monkeypatch, tmp_path):
@@ -1365,7 +1365,7 @@ class TestApprovalMenus:
             lambda *args, **kwargs: pytest.fail("trusted command should bypass chooser"),
         )
 
-        assert _confirm_shell("pytest -q", str(tmp_path)) is True
+        assert _confirm_shell("pytest -q", str(tmp_path)) == "pytest -q"
 
     def test_confirm_tool_uses_chooser_result(self, monkeypatch, tmp_path):
         from app import main as main_mod

@@ -118,13 +118,13 @@ class TestWhitelist:
 
 class TestConfirmFn:
     def test_deny_skips_execution(self, tmp_path):
-        shell_agent.configure(workspace=str(tmp_path), confirm_fn=lambda cmd: False, stream_to_console=False)
+        shell_agent.configure(workspace=str(tmp_path), confirm_fn=lambda cmd: None, stream_to_console=False)
         result = shell_agent.execute("python --version", cwd=str(tmp_path))
         assert result.denied is True
         assert result.exit_code == 1
 
     def test_approve_runs_command(self, tmp_path):
-        shell_agent.configure(workspace=str(tmp_path), confirm_fn=lambda cmd: True, stream_to_console=False)
+        shell_agent.configure(workspace=str(tmp_path), confirm_fn=lambda cmd: cmd, stream_to_console=False)
         result = shell_agent.execute("python --version", cwd=str(tmp_path))
         assert result.ok
 
@@ -132,7 +132,7 @@ class TestConfirmFn:
         calls = []
         shell_agent.configure(
             workspace=str(tmp_path),
-            confirm_fn=lambda cmd, cwd: calls.append((cmd, cwd)) or True,
+            confirm_fn=lambda cmd, cwd: calls.append((cmd, cwd)) or cmd,
             stream_to_console=False,
         )
         result = shell_agent.execute("python --version", cwd=str(tmp_path))

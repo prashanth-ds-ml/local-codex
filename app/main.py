@@ -3355,13 +3355,45 @@ def _cmd_brainstorm(raw: str, workspace: str, llm) -> str:
     return _save_brainstorm_reply(workspace, topic, reply)
 
 
-def _confirm_shell(command: str, cwd: str) -> bool:
-    """Ask the user before the shell agent runs any command."""
+def _amend_command(original: str) -> str | None:
+    """Let the user edit the command inline before running it.
+
+    Pre-fills the prompt with the original command so the user can adjust it.
+    Returns the edited command, or None if the user cancels (Ctrl+C / empty submit).
+    """
+    from prompt_toolkit import prompt as pt_prompt
+    from prompt_toolkit.history import InMemoryHistory
+
+    console.print(
+        "\n  [bold yellow]Amend command[/bold yellow] — edit below, then press Enter to run. Ctrl+C to cancel.\n"
+    )
+    history = InMemoryHistory()
+    history.append_string(original)
+    try:
+        amended = pt_prompt("  $ ", default=original, history=history).strip()
+    except (KeyboardInterrupt, EOFError):
+        _print_approval_result("Cancelled", approved=False)
+        return None
+    if not amended:
+        _print_approval_result("Cancelled (empty command)", approved=False)
+        return None
+    if amended != original:
+        _print_approval_result(f"Amended to: {amended}", approved=True)
+    else:
+        _print_approval_result("Approved (unchanged)", approved=True)
+    return amended
+
+
+def _confirm_shell(command: str, cwd: str) -> str | None:
+    """Ask the user before the shell agent runs any command.
+
+    Returns the (possibly amended) command string to run, or None to deny.
+    """
     workspace = shell_agent._config.root_workspace or cwd
     command_name = _shell_command_name(command)
     if memory.is_shell_command_trusted(workspace, cwd, command_name):
         _print_approval_result(f"Trusted `{command_name}` in {cwd}", approved=True)
-        return True
+        return command
 
     choice = _choose_approval_option(
         "Run shell command",
@@ -3369,6 +3401,7 @@ def _confirm_shell(command: str, cwd: str) -> bool:
         [
             ("approve", "Yes"),
             ("trust", f"Yes, and don't ask again for `{command_name}` in this directory"),
+            ("amend", "Tab to amend — edit the command before running"),
             ("deny", "No, and cancel this command"),
         ],
         fallback_default="approve",
@@ -3376,10 +3409,12 @@ def _confirm_shell(command: str, cwd: str) -> bool:
     if choice == "trust":
         memory.trust_shell_command(workspace, cwd, command_name)
         _print_approval_result(f"Approved and trusted `{command_name}` in {cwd}", approved=True)
-        return True
+        return command
+    if choice == "amend":
+        return _amend_command(command)
     approved = choice == "approve"
     _print_approval_result("Approved" if approved else "Skipped", approved=approved)
-    return approved
+    return command if approved else None
 
 
 def _cmd_run(command: str, workspace: str | None = None) -> None:

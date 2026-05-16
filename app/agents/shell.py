@@ -53,7 +53,7 @@ class ShellConfig:
     default_timeout: int = 60          # seconds
     max_output_lines: int = 200        # lines kept in memory
     stream_to_console: bool = True     # print output live
-    confirm_fn: Callable[..., bool] | None = None  # (command, cwd) -> bool
+    confirm_fn: Callable[..., str | None] | None = None  # (command, cwd) -> amended_command | None
 
 _config = ShellConfig()
 _background_tasks: dict[str, "BackgroundTask"] = {}
@@ -220,9 +220,10 @@ def _split_command(command: str) -> list[str]:
     return shlex.split(command, posix=(platform.system() != "Windows"))
 
 
-def _confirm_command(command: str, cwd: str) -> bool:
+def _confirm_command(command: str, cwd: str) -> str | None:
+    """Call confirm_fn and return the (possibly amended) command, or None if denied."""
     if _config.confirm_fn is None:
-        return True
+        return command
     params = list(inspect.signature(_config.confirm_fn).parameters.values())
     positional = [
         param for param in params
@@ -232,8 +233,8 @@ def _confirm_command(command: str, cwd: str) -> bool:
         )
     ]
     if any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in params) or len(positional) >= 2:
-        return bool(_config.confirm_fn(command, cwd))
-    return bool(_config.confirm_fn(command))
+        return _config.confirm_fn(command, cwd)
+    return _config.confirm_fn(command)
 
 
 def _background_worker(task_id: str) -> None:
@@ -298,7 +299,7 @@ def _validate_background_command(command: str, resolved_cwd: str) -> str | None:
     if err := _check_executable(command):
         return f"✗ Permission denied: {err}"
 
-    if _config.confirm_fn is not None and not _confirm_command(command, resolved_cwd):
+    if _config.confirm_fn is not None and _confirm_command(command, resolved_cwd) is None:
         return "✗ Skipped: user declined"
 
     return None
@@ -532,11 +533,12 @@ def execute(
     if err := _check_executable(command):
         return ShellResult(command=command, cwd=resolved_cwd, exit_code=1, output_lines=[f"✗ Permission denied: {err}"])
 
-    # User confirmation
+    # User confirmation — confirm_fn may return an amended command string or None (denied)
     if _config.confirm_fn is not None:
-        approved = _confirm_command(command, resolved_cwd)
-        if not approved:
+        approved_command = _confirm_command(command, resolved_cwd)
+        if approved_command is None:
             return ShellResult(command=command, cwd=resolved_cwd, exit_code=1, output_lines=["Skipped: user declined"], denied=True)
+        command = approved_command
 
     lines: list[str] = []
     proc: subprocess.Popen | None = None
